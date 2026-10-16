@@ -472,7 +472,8 @@ public:
         bool fleeing=living && mind.state==CreatureMind::State::Flee;
         bool seekingFood=living && mind.state==CreatureMind::State::SeekFood;
         float escapeError=std::remainder(wanted-std::atan2(heading.y,heading.x),2*PI);
-        bool pivoting=walking && !seekingFood && std::abs(escapeError)>(escapeTurning?.12f:.35f);
+        float turnThreshold=seekingFood?(escapeTurning?.06f:.12f):(escapeTurning?.12f:.35f);
+        bool pivoting=walking && std::abs(escapeError)>turnThreshold;
         if(pivoting && fleeing) mind.deadline=std::max(mind.deadline,mind.age+.8f);
         if(pivoting && !escapeTurning) {
             // Keep existing contacts and finish any stride already in flight.
@@ -484,8 +485,8 @@ public:
             // contacts remain in world space; never rotate the entire pose.
             float support=0;
             for(const auto& l:legs) if(l.phase<1) support+=std::sin(PI*l.phase);
-            float limit=fleeing?7.6f:1.3f;
-            float desiredTurn=std::clamp(escapeError*(fleeing?10.f:3.f),-limit,limit)*std::min(1.f,support);
+            float limit=fleeing?7.6f:seekingFood?2.6f:1.3f;
+            float desiredTurn=std::clamp(escapeError*(fleeing?10.f:seekingFood?5.f:3.f),-limit,limit)*std::min(1.f,support);
             angularSpeed+=(desiredTurn-angularSpeed)*(1-std::exp(-dt*(fleeing?24.f:12.f)));
             float rotation=angularSpeed*dt;
             // A planted foot near the head's centerline needs a new contact
@@ -514,14 +515,14 @@ public:
         float arrival=std::clamp(length(target-pos)/100.f,.18f,1.f);
         float alignment=std::clamp(std::cos(diff),.12f,1.f);
         float pace=1;
-        V travelDirection=seekingFood?unit(target-pos):heading;
+        V travelDirection=heading;
         float travelFactor=fleeing || (living && mind.state==CreatureMind::State::Explore)?1.f:seekingFood?std::clamp(length(target-pos)/90.f,.04f,1.f):arrival*alignment;
         V desired=walking && !pivoting?travelDirection*(effectiveSpeed*travelFactor*pace):V{};
         bool inspecting=living && mind.state==CreatureMind::State::Explore && mind.inspecting;
         bool quickRoam=living && mind.state==CreatureMind::State::Explore && mind.quickBout && !inspecting;
         velocity=mix(velocity,desired,1-std::exp(-dt*(fleeing?14.f:inspecting||quickRoam?12.f:4.f)));
         if(inspecting && length(velocity)<.8f) velocity={};
-        if(fleeing) velocity=pivoting?V{}:heading*length(velocity);
+        if(fleeing || seekingFood) velocity=pivoting?V{}:heading*length(velocity);
         // Locomotion owns a smooth torso trajectory. Feet articulate around
         // it; their constraint corrections cannot shake the body anymore.
         V next=pos+velocity*dt;
@@ -566,7 +567,7 @@ public:
                 float furthest=0;candidate=-1;
                 for(int i=0;i<8;++i) if(legs[i].phase>=1) {
                     auto neutral=neutralChain(i)[FOOT];
-                    float lead=fleeing?.7f:.28f;
+                    float lead=fleeing?.7f:seekingFood?.38f:.28f;
                     float rotation=std::atan2(heading.y,heading.x)+std::clamp(escapeError,-lead,lead);
                     V turningContact=pos+V{neutral.x*std::cos(rotation)-neutral.y*std::sin(rotation),
                                     neutral.x*std::sin(rotation)+neutral.y*std::cos(rotation)};
@@ -594,7 +595,7 @@ public:
             if(candidate%4==2) l.duration*=.85f;
             if(fleeing || seekingFood) l.duration=.12f;
             if(urgentStep) l.duration=fleeing?.065f:.09f;
-            if(pivoting) l.duration=fleeing?.055f:.19f;
+            if(pivoting) l.duration=fleeing?.055f:seekingFood?.13f:.19f;
             else if(quickRoam) l.duration=.065f;
             l.from=living?l.joints[FOOT]:l.foot;
             // Desktop contacts are continuous: rounding and fresh random
@@ -606,7 +607,7 @@ public:
             V support=pos+local(neutral.x,neutral.y);
             V desiredContact=walking?support+velocity*.34f:home(candidate);
             if(pivoting) {
-                float lead=fleeing?.7f:.28f;
+                float lead=fleeing?.7f:seekingFood?.38f:.28f;
                 float rotation=std::atan2(heading.y,heading.x)+std::clamp(escapeError,-lead,lead);
                 desiredContact=pos+V{neutral.x*std::cos(rotation)-neutral.y*std::sin(rotation),
                                     neutral.x*std::sin(rotation)+neutral.y*std::cos(rotation)};
@@ -635,7 +636,7 @@ public:
                 stepCooldown=walking?std::clamp(.085f*75.f/std::max(15.f,effectiveSpeed),.045f,.18f):.16f;
                 if(fleeing) stepCooldown=.045f;
                 else if(seekingFood) stepCooldown=.055f;
-                if(pivoting) stepCooldown=fleeing?.0175f:.065f;
+                if(pivoting) stepCooldown=fleeing?.0175f:seekingFood?.045f:.065f;
             } else {l.goal=l.foot;stepCooldown=.025f;}
         }
         solveLegs(dt);

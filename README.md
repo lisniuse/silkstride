@@ -138,7 +138,9 @@ closed and never reduces movement speed. Eating continues until hunger is 5 or l
 
 It only targets a visible, exposed, genuine Windows Recycle Bin folder view on
 the pet's monitor. It locates an actual filename, walks close, and chews for about
-4 seconds. Each confirmed permanent deletion reduces hunger by 15 points. It
+4 seconds. It first steps to face the filename, then moves forward along its
+head direction, realigning when the target changes. Each confirmed permanent
+deletion reduces hunger by 15 points. It
 rechecks file identity, visibility, position, and body distance before deleting;
 scrolling, sorting, or moving the window makes it locate the target again.
 
@@ -344,7 +346,8 @@ Released under the [MIT License](LICENSE).
 只计算宠物运行且未暂停的时间，活动与休息采用相同节奏；关闭时不增长。
 饥饿不降低移动速度，进食仍持续到饥饿不高于 5。
 
-它只会寻找所在屏幕上可见、未被遮住的真实 Windows 回收站视图。先定位文件名，爬近并停稳，
+它只会寻找所在屏幕上可见、未被遮住的真实 Windows 回收站视图。先定位文件名，踩步转到面朝文件，
+再沿头部方向靠近并停稳；目标变化时也先重新对准，避免侧滑。
 咀嚼约 4 秒。每成功永久删除一个文件，饥饿减少 15 点。删除前再次核对文件身份、可见性、
 位置和身体距离；滚动、排序或移动窗口时会重新定位。
 
