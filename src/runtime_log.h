@@ -66,7 +66,7 @@ public:
         wchar_t folder[MAX_PATH]{};
         if(SUCCEEDED(SHGetFolderPathW(nullptr,CSIDL_LOCAL_APPDATA,nullptr,0,folder))
            &&open(std::wstring(folder)+L"\\NeonSpider")) {
-            write("event=version value=0.2.1");
+            write("event=version value=0.2.2");
             SetUnhandledExceptionFilter(onException);
             std::set_terminate([]()noexcept{write("event=cpp_terminate");std::abort();});
         }

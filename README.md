@@ -21,6 +21,15 @@ extract it, and launch `Silkstride.exe`. The release executable is unsigned.
 Look for its spider icon in the system tray, including the hidden-icons overflow.
 Only one instance runs at a time.
 
+When launched from a terminal job that terminates its children on cleanup,
+Silkstride relaunches independently if the host explicitly permits Windows job
+breakaway. This prevents a terminal cleanup from taking the pet down with it.
+Ordinary diagnostics stay synchronous. If the host forbids breakaway, the app
+respects that policy; launch it from Explorer instead. The runtime log records
+job flags, relaunch origin, and any detachment error. A host may impose further
+job limits; for development launches, prefer `pwsh -NoProfile -File ./run.ps1`,
+which asks the Windows shell to start the pet instead of a terminal launcher.
+
 **Recycle Bin feeding permanently deletes real files. It is enabled by default.**
 To disable it, uncheck **Eat Recycle Bin files (permanently delete one at a time)**
 in the tray menu. Use disposable files when trying this feature.
@@ -130,7 +139,7 @@ SDK, and **PowerShell 7**. No external C++ libraries are needed.
 git clone https://github.com/lisniuse/silkstride.git
 cd silkstride
 pwsh -NoProfile -File ./build.ps1
-./build/Silkstride.exe
+pwsh -NoProfile -File ./run.ps1
 ```
 
 The script builds x64 Release with a static C++ runtime. CMake 3.20+ is also
@@ -166,6 +175,7 @@ fails or does not produce a report. For the manual arguments below, run
 | `--i18n-test` | Both catalogs, state labels, locale fallback, preference serialization, panel previews |
 | `--startup-test` | First-launch registration, opt-out persistence, quoted paths, isolated registry cleanup |
 | `--logging-test` | Durable events, exception formatting, incomplete-session detection, rotation and fixture cleanup |
+| `--launch-test` | Owned kill-on-close job, independent diagnostic relaunch, survival after launcher cleanup |
 | `--smoke-test` | Real window, tray, and hook; exits after three seconds |
 | `--preview` | Export `preview.png` without starting autonomous behavior |
 | `--input-test` | Moves the cursor and exercises real mouse input; restores cursor position |
@@ -177,7 +187,9 @@ test file, and leaves that file in the bin if validation fails. It never enables
 ordinary feeding or submits pre-existing files for deletion. Diagnostic modes do
 not load or overwrite pet memory. The startup test uses its own temporary GUID
 registry subtree and never modifies real startup entries. Logging tests use
-temporary files under `out/tests/`, not personal runtime logs. CI runs the seven
+temporary files under `out/tests/`, not personal runtime logs. The launch test
+uses only an owned three-second diagnostic window; it skips the breakaway check
+if an outer host job explicitly denies it. CI runs the eight
 non-destructive suites and uploads the Windows executable and reports.
 
 See [AGENTS.md](AGENTS.md) for contributor conventions. **Commit messages must use
@@ -203,6 +215,12 @@ Released under the [MIT License](LICENSE).
 从 [Releases](https://github.com/lisniuse/silkstride/releases/latest) 下载
 `Silkstride-windows-x64.zip`，解压后运行 `Silkstride.exe`。发布程序未做数字签名。
 右下角系统托盘中有蜘蛛图标，可能收在“隐藏的图标”中。程序同时只运行一个实例。
+
+从“清理时结束全部子进程”的终端任务组启动时，如果宿主明确允许 Windows 的任务组脱离，
+程序会重新独立启动，避免终端清理时连带退出。普通诊断模式仍同步运行。宿主不允许脱离或
+重新施加限制时会尊重限制，可改从资源管理器启动。运行日志记录任务组标志、独立启动来源及
+失败代码。开发时优先使用 `pwsh -NoProfile -File ./run.ps1`，由 Windows Shell 启动宠物，
+避免直接依附于终端启动器。
 
 **回收站进食会永久删除真实文件，默认开启。** 可在托盘取消勾选
 **回收站进食（逐个永久删除文件）**。体验此功能时请使用一次性测试文件。
@@ -292,7 +310,7 @@ Released under the [MIT License](LICENSE).
 git clone https://github.com/lisniuse/silkstride.git
 cd silkstride
 pwsh -NoProfile -File ./build.ps1
-./build/Silkstride.exe
+pwsh -NoProfile -File ./run.ps1
 ```
 
 脚本生成 x64 Release，静态链接 C++ 运行库。也支持 CMake 3.20+：
@@ -325,6 +343,7 @@ pwsh -NoProfile -File ./test.ps1 -Suite startup
 | `--i18n-test` | 中英文文案、行为标签、语言回退、偏好序列化和面板预览 |
 | `--startup-test` | 首次注册、关闭后不重建、路径引号和隔离注册表清理 |
 | `--logging-test` | 事件落盘、异常格式、未完成会话识别、轮换和测试文件清理 |
+| `--launch-test` | 隔离的“关闭即结束进程”任务组、独立启动、宿主清理后仍存活 |
 | `--smoke-test` | 实际窗口、托盘与钩子，三秒后退出 |
 | `--preview` | 导出 `preview.png`，不启动自主行为 |
 | `--input-test` | 短暂移动鼠标，验证真实输入，结束后恢复光标 |
@@ -334,7 +353,8 @@ pwsh -NoProfile -File ./test.ps1 -Suite startup
 Canary 测试要求真实回收站窗口可见，会选中并滚动到自己的测试条目；失败时可能将测试文件
 留在回收站。它不会开启日常进食或提交原有文件进行删除。诊断模式不加载或覆盖宠物存档。
 开机启动测试使用自己临时创建的 GUID 注册表子树，不修改真实启动项。日志测试在
-`out/tests/` 使用临时文件，不修改个人运行日志。CI 运行七组
+`out/tests/` 使用临时文件，不修改个人运行日志。启动生命周期测试只操作自己的三秒诊断窗口；
+外层宿主明确禁止脱离任务组时会跳过对应检查。CI 运行八组
 无破坏性的检查，并上传 Windows 程序和报告。
 
 贡献约定见 [AGENTS.md](AGENTS.md)。**提交信息必须使用 Conventional Commits（CC）风格**，

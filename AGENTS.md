@@ -29,6 +29,9 @@ Examples / 示例：
 ## Project / 项目
 
 - Native C++17, Win32, GDI+; build with `pwsh -NoProfile -File ./build.ps1`.
+- Launch the long-lived pet with `pwsh -NoProfile -File ./run.ps1` (Windows Shell),
+  not ordinary `Start-Process` from a managed terminal job. Diagnostics still use
+  synchronous launches through `test.ps1` / 常驻宠物通过 Windows Shell 启动。
 - Put user-facing translations in `src/i18n.h`; keep English and Chinese aligned.
   用户界面文案集中维护，中英翻译保持一致。
 - Keep both language sections of `README.md` in sync / README 中英内容同步更新。
@@ -39,7 +42,9 @@ Examples / 示例：
   Use `pwsh -NoProfile -File ./test.ps1` for diagnostics, with reports and images
   in `out/tests/`. Run manual diagnostic arguments from `out/tests/` as well.
   Non-destructive CI checks are motion,
-  interaction, behavior, feeding, i18n, startup, and logging tests. Logging tests
+  interaction, behavior, feeding, i18n, startup, logging, and launch tests. Launch
+  tests must use only owned diagnostic children, with no feeding or personal state.
+  Logging tests
   must not modify personal runtime logs. Startup tests must use
   isolated registry keys and never change actual sign-in startup entries.
   The input test moves the cursor;

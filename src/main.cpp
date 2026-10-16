@@ -30,6 +30,7 @@ V mix(V a,V b,float t) { return a*(1-t)+b*t; }
 #include "i18n.h"
 #include "startup.h"
 #include "runtime_log.h"
+#include "process_launch.h"
 #include "behavior.h"
 #include "recycle_food.h"
 #include "feeding.h"
@@ -825,6 +826,7 @@ int interactionTest(Spider& s) {
 #include "i18n_tests.h"
 #include "startup_tests.h"
 #include "logging_tests.h"
+#include "launch_tests.h"
 LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l) {
     static UINT taskbar=RegisterWindowMessageW(L"TaskbarCreated");
     if(m==taskbar && app) {RuntimeLog::write("event=taskbar_recreated");app->addTray(); return 0; }
@@ -854,11 +856,21 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l) {
     return DefWindowProcW(h,m,w,l);
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
-    HANDLE mutex=CreateMutexW(nullptr,TRUE,L"Local\\NeonSpider.DesktopPet");
+    bool diagnostic=wcsstr(command,L"--")!=nullptr;
+    bool launchProbe=wcsstr(command,L"/verify-independent-launch")!=nullptr;
+    auto launch=ProcessLaunch::detachIfNeeded(command,!diagnostic||launchProbe);
+    if(launch.relaunched)return 0;
+    // The isolated lifetime probe runs alongside the test harness, without
+    // joining the normal pet's instance lock or enabling any personal features.
+    HANDLE mutex=launchProbe?nullptr:CreateMutexW(nullptr,TRUE,L"Local\\NeonSpider.DesktopPet");
     DWORD mutexError=GetLastError();
-    if(mutexError==ERROR_ALREADY_EXISTS) { if(mutex) CloseHandle(mutex); return 0; }
-    if(wcsstr(command,L"--")==nullptr)RuntimeLog::start();
-    if(!mutex)RuntimeLog::write("event=mutex_failed error=%lu",mutexError);
+    if(!launchProbe&&mutexError==ERROR_ALREADY_EXISTS) { if(mutex) CloseHandle(mutex); return 0; }
+    if(!diagnostic)RuntimeLog::start();
+    auto job=ProcessLaunch::currentJob();
+    RuntimeLog::write("event=process_job inside=%d flags=0x%08lX query_error=%lu detach_error=%lu",job.inside,job.flags,job.error,launch.error);
+    if(auto origin=wcsstr(command,L"/independent-from="))RuntimeLog::write("event=independent_launch parent_pid=%lu",wcstoul(origin+18,nullptr,10));
+    if(launchProbe){std::ofstream probe("launch-probe.txt");probe<<GetCurrentProcessId()<<" "<<job.inside<<" "<<job.flags<<" "<<launch.error<<"\n";}
+    if(!mutex&&!launchProbe)RuntimeLog::write("event=mutex_failed error=%lu",mutexError);
     HRESULT com=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED|COINIT_DISABLE_OLE1DDE);
     ULONG_PTR token; GdiplusStartupInput startup;
     if(GdiplusStartup(&token,&startup,nullptr)!=Ok) {RuntimeLog::write("event=gdiplus_failed");RuntimeLog::finish(1);if(SUCCEEDED(com))CoUninitialize();CloseHandle(mutex);return 1;}
@@ -869,7 +881,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
         if(spider.living) spider.loadMemory();
         POINT p; GetCursorPos(&p); spider.monitorAt(p); spider.initSurface();
         if(spider.living) {spider.saveMemory();spider.feeder.setEnabled(spider.mind.autoEat);spider.feeder.start();spider.feedingLive=true;}
-        if(wcsstr(command,L"--logging-test")) {result=loggingTest();}
+        if(wcsstr(command,L"--launch-test")) {result=launchTest();}
+        else if(wcsstr(command,L"--logging-test")) {result=loggingTest();}
         else if(wcsstr(command,L"--startup-test")) {result=startupTest();}
         else if(wcsstr(command,L"--i18n-test")) {result=i18nTest(spider);}
         else if(wcsstr(command,L"--feeding-canary-test")) {result=feedingCanaryTest();}
