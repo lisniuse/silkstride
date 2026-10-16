@@ -276,7 +276,9 @@ public:
             float edge=std::min(1.f,std::min(age,deadline-age)*3);
             envelope=std::max(0.f,edge); x=std::sin(age*7)*7*envelope; y=-side*(15+9*std::sin(age*5))*envelope;
         } else if(state==State::Eat && (leg==0 || leg==4)) {
-            envelope=std::min(1.f,age*2);x=(8+std::sin(age*12)*4)*envelope;y=-side*(12+std::sin(age*12)*5)*envelope;
+            // Small distal handling motions suit the longer, extended stance;
+            // a large forefoot sweep would rock the whole body off its meal.
+            envelope=std::min(1.f,age*2)*.4f;x=(8+std::sin(age*12)*4)*envelope;y=-side*(12+std::sin(age*12)*5)*envelope;
         }
         return {heading.x*x-heading.y*y,heading.y*x+heading.x*y-envelope*5};
     }

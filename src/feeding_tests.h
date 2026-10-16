@@ -49,12 +49,17 @@ int feedingTest(Spider& spider) {
         spider.cursorPrimed=false;spider.sensedCursorVelocity={};spider.hovered=-1;
         RecycleFoodView anchor;anchor.visible=true;anchor.token=L"mock-visible-row";anchor.name=L"mock.txt";
         anchor.window=reinterpret_cast<HWND>(1);anchor.point=point;anchor.area={200,100,1600,1200};
-        spider.food=anchor;spider.mind.init(spider.senses());FeedingCycle chewing;bool ready=false;float distance=10000;
+        spider.food=anchor;spider.mind.init(spider.senses());FeedingCycle chewing;bool ready=false;float distance=10000,maxChew=0;
+        int eatEntries=0;bool wasEating=false;
         for(int frame=0;frame<3000 && !ready;++frame) {
             spider.advance(1.f/120);distance=length(spider.pos-point);
+            bool eating=spider.mind.state==State::Eat;
+            if(eating&&!wasEating)++eatEntries;wasEating=eating;
             ready=chewing.advance(1.f/120,spider.mind.state==State::Eat && distance<=18*size,anchor);
+            maxChew=std::max(maxChew,chewing.chewing);
         }
-        out<<"Arrival scale="<<size<<" target="<<point.x<<","<<point.y<<" distance="<<distance<<"\n";
+        out<<"Arrival scale="<<size<<" target="<<point.x<<","<<point.y<<" distance="<<distance
+           <<" eat entries="<<eatEntries<<" longest chew="<<maxChew<<"\n";
         check(ready && distance<=18*size,"Physical body reaches the filename and stays close for a complete chew");
     }
     spider.food={};spider.scale=1;

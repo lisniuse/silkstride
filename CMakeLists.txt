@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Silkstride VERSION 0.3.0 LANGUAGES CXX)
+project(Silkstride VERSION 0.3.1 LANGUAGES CXX)
 add_executable(Silkstride WIN32 src/main.cpp)
 target_compile_features(Silkstride PRIVATE cxx_std_17)
 target_compile_definitions(Silkstride PRIVATE UNICODE _UNICODE NOMINMAX)

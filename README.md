@@ -40,6 +40,8 @@ in the tray menu. Use disposable files when trying this feature.
   planted contacts, alternating steps, and an inertial body. This is a stylized
   four-segment model, not a one-to-one anatomical model. The short distal foot
   continues the lower leg with a subtle bend instead of folding back into a hook.
+  A short root and two long main sections form a gently bent, fanned stance;
+  the knees follow the body-to-foot direction instead of a permanent zigzag.
 - **Natural regional colors by default.** A dark brown head/chest, a lighter
   patterned abdomen, and brown legs with dark bands. Enable rainbow cycling in
   the tray for synchronized changing colors; turning it off restores natural
@@ -174,8 +176,8 @@ fails or does not produce a report. For the manual arguments below, run
 
 | Argument | Coverage |
 | --- | --- |
-| `--motion-test` | Walking, planted feet, turn stability, contact-driven body movement |
-| `--interaction-test` | All eight legs at three sizes: drag, flail, throw, land |
+| `--motion-test` | Walking, planted feet, standing/grounded joint deflection, turn stability, contact-driven body movement |
+| `--interaction-test` | All eight legs at three sizes: drag, flail, throw, land; body response relative to pointer travel |
 | `--behavior-test` | Fear, curiosity, rest, memory, two-minute physical simulation |
 | `--feeding-test` | Mock feeding, interruption, filename approach, persistence; no real deletions |
 | `--i18n-test` | Both catalogs, state labels, locale fallback, preference serialization, panel previews |
@@ -237,6 +239,8 @@ Released under the [MIT License](LICENSE).
 
 - **用脚牵动身体行走**：四段关节、距离和角度约束、固定落脚点、交替换脚，身体有惯性。
   四段是简化的视觉模型，并非真实解剖的一一对应；末端足节缩短、顺势轻弯，不再反折成钩子。
+  腿根较短、两段主体拉长，以轻微弯折向外展开；主关节沿身体到脚尖的方向排列，去掉固定的
+  “之”字折叠站姿。
 - **默认自然分区配色**：头胸部深褐色，腹部为较浅的暖褐色并带细纹，腿部有深色环带。
   托盘可开启彩虹循环，使全身同步变色；关闭后恢复自然色。每次启动默认使用自然配色。
 - **抓脚、挣扎和甩动**：左键按住任意脚尖，身体悬挂，其他七条腿自由挣扎。轻放或甩出后，
@@ -347,8 +351,8 @@ pwsh -NoProfile -File ./test.ps1 -Suite startup
 
 | 参数 | 验证内容 |
 | --- | --- |
-| `--motion-test` | 步态、脚点固定、转向稳定、脚点驱动身体 |
-| `--interaction-test` | 八条腿 × 三种大小：拖拽、挣扎、甩动和落地 |
+| `--motion-test` | 步态、脚点固定、站立/落地关节转折、转向稳定、脚点驱动身体 |
+| `--interaction-test` | 八条腿 × 三种大小：拖拽、挣扎、甩动和落地；身体相对鼠标行程的响应 |
 | `--behavior-test` | 警觉、好奇、休息、记忆和两分钟真实物理模拟 |
 | `--feeding-test` | 模拟进食、中断、靠近文件名和存档；不删除真实文件 |
 | `--i18n-test` | 中英文文案、行为标签、语言回退、偏好序列化和面板预览 |

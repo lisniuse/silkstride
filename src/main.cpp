@@ -308,22 +308,25 @@ public:
         int row=i%4,side=i<4?-1:1;
         float forward=row<2?1.f:-1.f;
         V h=hip(i), f=home(i);
-        V knee=pos+bodyOffset+local((row==0?114.f:row==1?88.f:row==2?-88.f:-114.f)*scale,
-                                    (row==0||row==3?45.f:66.f)*side*scale);
-        V distal=unit(f-knee);float turn=side*.16f;
+        V shoulder=h+bodyLocal(forward*2*scale,side*4*scale);
+        V reach=unit(f-shoulder),outward{-reach.y,reach.x};
+        // Two long, gently bowed sections follow the body-to-foot direction.
+        // Preserve reach by spreading the contacts, not by pushing the knee
+        // past the foot into a permanent zigzag. Mirror front/rear and sides.
+        V knee=mix(shoulder,f,.48f)+outward*(side*forward*16*scale);
+        V distal=unit(f-knee);float turn=side*.10f;
         V toeDirection{distal.x*std::cos(turn)-distal.y*std::sin(turn),
                        distal.x*std::sin(turn)+distal.y*std::cos(turn)};
         // A short distal foot continues the shin with a slight mirrored bend.
         // Its joint stays before the contact, rather than overshooting the toe
         // and folding back into the conspicuous hook of the old silhouette.
         V ankle=f-toeDirection*(8*scale);
-        return {h,h+bodyLocal(forward*3*scale,side*9*scale),
-                knee,ankle,f};
+        return {h,shoulder,knee,ankle,f};
     }
     V home(int i) const {
         int side=i<4?-1:1, row=i%4;
-        static const float xs[]={89,34,-36,-92};
-        static const float ys[]={79,116,116,80};
+        static const float xs[]={108,43,-45,-112};
+        static const float ys[]={104,136,136,105};
         float stance=living?mind.stance:1.f;
         float x=xs[row]*scale,y=ys[row]*side*scale*stance;
         return pos+V{aimHeading.x*x-aimHeading.y*y,aimHeading.y*x+aimHeading.x*y};
@@ -485,8 +488,8 @@ public:
             l.from=living?l.joints[4]:l.foot;
             // The web in the reference supplies discrete anchor particles. Use an
             // invisible desktop contact lattice, biased toward the roaming target.
-            V desiredContact=home(candidate)+(walking?velocity*(fleeing||seekingFood?.34f:.58f):V{});
             bool precise=seekingFood && length(target-pos)<80*scale;
+            V desiredContact=home(candidate)+(walking?velocity*(fleeing||precise?.34f:.58f):V{});
             float scatter=precise?2.f:10.f;
             desiredContact=desiredContact+V{random(-scatter,scatter),random(-scatter,scatter)}*scale;
             float grid=(precise?2.f:10.f)*scale;
@@ -496,9 +499,13 @@ public:
                 l.goal.x=std::clamp(l.goal.x,work.left+inset,work.right-inset);
                 l.goal.y=std::clamp(l.goal.y,work.top+inset,work.bottom-inset);
             }
-            V reach=l.goal-pos;
+            // A long, nearly extended leg must land relative to where the body
+            // can be when the step finishes. Clamping against the current torso
+            // would prevent its front feet from ever stepping ahead.
+            V landingCenter=pos+(walking?velocity*(l.duration*.8f):V{});
+            V reach=l.goal-landingCenter;
             float maxReach=0; for(float bone:l.bones) maxReach+=bone;
-            if(length(reach)>maxReach*.94f) l.goal=pos+unit(reach)*(maxReach*.94f);
+            if(length(reach)>maxReach*.98f) l.goal=landingCenter+unit(reach)*(maxReach*.98f);
             l.phase=0; l.lift=0;
             stepCooldown=walking?random(.085f,.145f)*75.f/std::max(15.f,effectiveSpeed):.16f;
         }
@@ -746,6 +753,9 @@ int motionTest(Spider& s) {
     // Causality regression: stationary contacts must not follow a scripted path;
     // changing one contact must propagate to the free torso via constraints.
     for(int n=0;n<240;++n) s.solveLegs(1.f/120);
+    float standingFold=0;
+    for(const auto& leg:s.legs)
+        standingFold=std::max(standingFold,std::abs(CrawlPhysics::angle(leg.joints[2]-leg.joints[1],leg.joints[3]-leg.joints[2]))*180/PI);
     V fixedStart=s.pos;
     for(int n=0;n<240;++n) s.solveLegs(1.f/120);
     float fixedBodyDrift=length(s.pos-fixedStart);
@@ -757,7 +767,7 @@ int motionTest(Spider& s) {
     float contactPull=length(s.pos-pullStart);
     s.pos={900,700}; s.heading={1,0}; s.resetFeet();
     int steps=0, planted=0, maxSwing=0; float drift=0, maxReach=0, maxBoneError=0;
-    float bodyTravel=0;
+    float bodyTravel=0,maxGroundedFold=0,groundedFoldSum=0;int groundedFoldSamples=0;
     for(int frame=0;frame<3600;++frame) {
         if(frame==900) s.target={200,250};
         if(frame==1800) { s.speed=135; s.target={1500,1100}; }
@@ -773,6 +783,8 @@ int motionTest(Spider& s) {
             if(before[i].phase>=1 && l.phase<1) { ++steps; ++starts; }
             if(before[i].phase>=1 && l.phase>=1) {
                 drift=std::max(drift,length(l.foot-before[i].foot)); ++planted;
+                float fold=std::abs(CrawlPhysics::angle(l.joints[2]-l.joints[1],l.joints[3]-l.joints[2]))*180/PI;
+                maxGroundedFold=std::max(maxGroundedFold,fold);groundedFoldSum+=fold;++groundedFoldSamples;
             }
             maxReach=std::max(maxReach,length(l.foot-(s.pos+s.local((23-i%4*15)*s.scale,(i<4?-8.f:8.f)*s.scale))));
             if(!std::isfinite(l.foot.x)||!std::isfinite(l.foot.y)||starts>1) return 3;
@@ -794,18 +806,21 @@ int motionTest(Spider& s) {
           <<"\nPlanted foot checks: "<<planted<<"\nPlanted foot drift: "<<drift
           <<"\nMaximum hip-foot distance: "<<maxReach
           <<"\nMaximum four-segment bone error: "<<maxBoneError
+          <<"\nMaximum standing main-joint deflection (degrees): "<<standingFold
+          <<"\nMaximum grounded main-joint deflection (degrees): "<<maxGroundedFold
+          <<"\nMean grounded main-joint deflection (degrees): "<<groundedFoldSum/std::max(1,groundedFoldSamples)
           <<"\nBody drift with all contacts fixed: "<<fixedBodyDrift
           <<"\nBody displacement from moving one foot 30px: "<<contactPull
           <<"\nBody travel driven by foot contacts: "<<bodyTravel<<"\n";
     bool ok=steps>60 && maxSwing<=3 && planted>1000 && drift==0 && maxReach<180 && maxBoneError<2
-        && fixedBodyDrift<.1f && contactPull>.5f && bodyTravel>200;
+        && fixedBodyDrift<.1f && contactPull>.5f && bodyTravel>200 && standingFold<50 && maxGroundedFold<100;
     report<<(ok?"PASS":"FAIL")<<"\n";
     return ok?0:4;
 }
 int interactionTest(Spider& s) {
     s.living=false;
     s.rng.seed(123);
-    int cases=0,failures=0; float maxPinError=0,maxBoneError=0,minBodyMotion=100000,minFlail=100000;
+    int cases=0,failures=0; float maxPinError=0,maxBoneError=0,minBodyMotion=100000,minFlail=100000,minBodyResponse=100000;
     for(float scale:{.7f,1.f,1.3f}) for(int leg=0;leg<8;++leg) {
         s.scale=scale; s.pos={900,700}; s.heading={1,0}; s.resetFeet();
         s.elapsed=0; s.rest=0; s.follow=false;
@@ -827,6 +842,10 @@ int interactionTest(Spider& s) {
             }
         }
         minBodyMotion=std::min(minBodyMotion,length(s.pos-start)); minFlail=std::min(minFlail,flail);
+        // Longer natural legs absorb more drag by unfolding. Require a clear
+        // body response relative to the actual pointer excursion, not a fixed
+        // displacement tuned to the former short, heavily folded silhouette.
+        minBodyResponse=std::min(minBodyResponse,length(s.pos-start)/std::max(1.f,length(s.dragTarget-anchor)));
         s.dragVelocity={700,-150}; s.lastDragTime=GetTickCount64(); s.endGrab();
         for(int n=0;n<180;++n) s.advance(1.f/120);
         if(s.grabbed!=-1 || s.airborne>0 || !std::isfinite(s.pos.x)||!std::isfinite(s.pos.y)) ++failures;
@@ -838,12 +857,13 @@ int interactionTest(Spider& s) {
         for(int n=0;n<90;++n) s.advance(1.f/120);
         ++cases;
     }
-    bool ok=failures==0 && maxPinError<.01f && maxBoneError<5 && minBodyMotion>100 && minFlail>10;
+    bool ok=failures==0 && maxPinError<.01f && maxBoneError<5 && minBodyResponse>.2f && minFlail>10;
     std::ofstream report("interaction-test.txt");
     report<<"All 8 legs at 3 sizes, drag/flail/throw/land/stationary release\nCases: "<<cases
           <<"\nFailures: "<<failures<<"\nMaximum held toe error: "<<maxPinError
           <<"\nMaximum bone length error while dragging: "<<maxBoneError
           <<"\nMinimum body displacement: "<<minBodyMotion
+          <<"\nMinimum body-to-pointer displacement ratio: "<<minBodyResponse
           <<"\nMinimum free leg motion relative to torso: "<<minFlail<<"\n"<<(ok?"PASS":"FAIL")<<"\n";
     return ok?0:6;
 }
