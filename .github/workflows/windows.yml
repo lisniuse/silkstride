@@ -15,7 +15,7 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
       - name: Build native x64 executable
         run: ./build.ps1
       - name: Run non-destructive diagnostics
@@ -26,7 +26,7 @@ jobs:
             Get-Content "$name-test.txt"
             if ($process.ExitCode -ne 0) { throw "$name test failed: $($process.ExitCode)" }
           }
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: Silkstride-windows-x64
