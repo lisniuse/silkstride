@@ -16,6 +16,10 @@
 using namespace Gdiplus;
 constexpr float PI = 3.14159265359f;
 constexpr int CANVAS = 480;
+constexpr int LEG_SEGMENTS = 6; // Coxa/trochanter share a root; five distal anatomical segments.
+constexpr int LEG_JOINTS = LEG_SEGMENTS + 1;
+constexpr int FOOT = LEG_SEGMENTS;
+constexpr int LEG_BENDS = LEG_SEGMENTS + 1;
 constexpr UINT TRAY = WM_APP + 1;
 struct V {
     float x=0, y=0;
@@ -37,9 +41,9 @@ V mix(V a,V b,float t) { return a*(1-t)+b*t; }
 struct Leg {
     V foot, from, goal;
     float phase=1, duration=.25f, lift=0;
-    std::array<V,5> joints{}, previous{};
-    std::array<float,4> bones{};
-    std::array<int,5> ids{};
+    std::array<V,LEG_JOINTS> joints{}, previous{};
+    std::array<float,LEG_SEGMENTS> bones{};
+    std::array<int,LEG_JOINTS> ids{};
 };
 class Spider {
 public:
@@ -67,6 +71,7 @@ public:
     V aimHeading{1,0};
     int legCursor=0;
     int grabbed=-1,hovered=-1;
+    bool escapeTurning=false;
     float airborne=0,grabTime=0;
     V dragTarget{},dragVelocity{},lastDragPoint{};
     ULONGLONG lastDragTime=0;
@@ -83,6 +88,7 @@ public:
     float scale=1, speed=75, rest=0, elapsed=0;
     float angularSpeed=0, stepCooldown=0, stride=0, bodyYaw=0;
     float accumulator=0;
+    float cursorSampleAge=0;
     V bodyOffset{}, bodySpring{};
     bool paused=false, follow=false, rainbow=false, showHungerPanel=false;
     HDC dc=nullptr;
@@ -98,7 +104,7 @@ public:
         CreatureMind::Senses result{pos,sensedCursor,work,sensedCursorSpeed,scale,cursorPrimed,follow,hovered>=0};
         result.foodVisible=mind.autoEat && food.visible && !food.token.empty()
             && food.point.x>=work.left && food.point.x<=work.right && food.point.y>=work.top && food.point.y<=work.bottom;
-        result.foodPoint=food.point;result.foodArea=food.area;result.cursorVelocity=sensedCursorVelocity;return result;
+        result.foodPoint=food.point;result.foodArea=food.area;result.cursorVelocity=sensedCursorVelocity;result.facing=heading;result.turning=escapeTurning;return result;
     }
     void stopEating() {feeder.allow(false);feeding.cancel();}
     void updateFeeding(float dt) {
@@ -171,14 +177,14 @@ public:
     }
     void inputTestTick() {
         if(inputStage==0) {
-            V foot=legs[0].joints[4];
+            V foot=legs[0].joints[FOOT];
             inputReport<<"Toe: "<<foot.x<<","<<foot.y<<"\n";
             BOOL moved=SetCursorPos(int(std::round(foot.x)),int(std::round(foot.y)));
             inputReport<<"SetCursorPos: "<<moved<<"\n";
         } else if(inputStage==1) {
             POINT cursor; GetCursorPos(&cursor);
             inputReport<<"Cursor before down: "<<cursor.x<<","<<cursor.y<<" hit: "<<footAt({float(cursor.x),float(cursor.y)})<<"\n";
-            injectMove(legs[0].joints[4],MOUSEEVENTF_LEFTDOWN);
+            injectMove(legs[0].joints[FOOT],MOUSEEVENTF_LEFTDOWN);
         }
         else if(inputStage==2 || inputStage==3 || inputStage==4) {
             bool held=grabbed>=0;
@@ -189,7 +195,7 @@ public:
                 // live cursor can move between timer callbacks; compare against
                 // the position consumed by this frame rather than a newer event.
                 tick();
-                float error=length(legs[grabbed].joints[4]-sensedCursor);
+                float error=length(legs[grabbed].joints[FOOT]-sensedCursor);
                 inputReport<<"Toe-to-sampled-cursor distance: "<<error<<" px\n";
                 if(error>2) ++inputFailures;
             }
@@ -210,7 +216,7 @@ public:
     int footAt(V point) const {
         int nearest=-1; float distance=std::max(12.f,12*scale);
         for(int i=0;i<8;++i) {
-            float d=length(point-legs[i].joints[4]);
+            float d=length(point-legs[i].joints[FOOT]);
             if(d<distance) { nearest=i; distance=d; }
         }
         return nearest;
@@ -223,7 +229,7 @@ public:
         dragTarget=cursor; lastDragPoint=cursor; dragVelocity={}; lastDragTime=GetTickCount64();
         for(int i=0;i<8;++i) {
             legs[i].phase=1; legs[i].lift=0;
-            physics.particles[legs[i].ids[4]].mass=i==grabbed?0.f:1.f;
+            physics.particles[legs[i].ids[FOOT]].mass=i==grabbed?0.f:1.f;
         }
         if(hwnd) RegisterHotKey(hwnd,3,MOD_NOREPEAT,VK_ESCAPE);
     }
@@ -262,10 +268,10 @@ public:
         for(auto& p:physics.particles) { p.p=p.p+shift; p.old=p.old+shift; }
         pos=center; aimHeading=heading;
         for(auto& l:legs) {
-            l.foot=physics.particles[l.ids[4]].p;
+            l.foot=physics.particles[l.ids[FOOT]].p;
             l.from=l.goal=l.foot; l.phase=1; l.lift=0;
-            physics.particles[l.ids[4]].mass=0;
-            for(int j=0;j<5;++j) l.joints[j]=physics.particles[l.ids[j]].p;
+            physics.particles[l.ids[FOOT]].mass=0;
+            for(int j=0;j<LEG_JOINTS;++j) l.joints[j]=physics.particles[l.ids[j]].p;
         }
         for(auto& b:physics.bends) b.rest=b.neutral;
         velocity={}; angularSpeed=0; stepCooldown=.12f; rest=.25f; chooseTarget();
@@ -276,17 +282,17 @@ public:
         grabTime+=dt;
         if(held) {
             // The held toe is the sole fixed particle; the other seven legs can flail.
-            physics.pin(legs[grabbed].ids[4],dragTarget);
+            physics.pin(legs[grabbed].ids[FOOT],dragTarget);
             for(size_t n=0;n<physics.bends.size();++n) {
-                auto& b=physics.bends[n]; int leg=int(n)/4;
-                float amplitude=leg==grabbed?.07f:(n%4==0?.3f:.48f);
+                auto& b=physics.bends[n]; int leg=int(n)/LEG_BENDS;
+                float amplitude=leg==grabbed?.07f:(n%LEG_BENDS==0?.3f:.48f);
                 // First recoil, then bursts of kicking with pauses during a long hold.
                 float recoil=grabTime<.3f?.3f:1.f;
                 float burst=recoil*(.2f+.8f*std::pow(.5f+.5f*std::sin(grabTime*4.1f),2.f));
-                b.rest=b.neutral+amplitude*burst*std::sin(grabTime*(10.f+leg*.73f)+leg*2.7f+n%4);
+                b.rest=b.neutral+amplitude*burst*std::sin(grabTime*(10.f+leg*.73f)+leg*2.7f+n%LEG_BENDS);
             }
             for(int i=0;i<8;++i) if(i!=grabbed) {
-                auto& p=physics.particles[legs[i].ids[4]];
+                auto& p=physics.particles[legs[i].ids[FOOT]];
                 float burst=.25f+.75f*std::pow(.5f+.5f*std::sin(grabTime*4.1f),2.f);
                 p.p=p.p+V{std::sin(grabTime*17+i*1.8f),std::cos(grabTime*13+i*2.2f)}*(1900*burst*scale*dt*dt);
             }
@@ -295,44 +301,54 @@ public:
             for(auto& b:physics.bends) b.rest+=(b.neutral-b.rest)*(1-std::exp(-dt*8));
         }
         physics.step(dt,held?V{0,300*scale}:V{});
+        constrainAnatomy(false);
         pos=physics.particles[0].p; heading=unit(physics.particles[1].p-pos);
-        for(auto& l:legs) for(int j=0;j<5;++j) l.joints[j]=physics.particles[l.ids[j]].p;
+        for(auto& l:legs) for(int j=0;j<LEG_JOINTS;++j) l.joints[j]=physics.particles[l.ids[j]].p;
         if(!held && airborne<=0) { airborne=0; land(); }
     }
     V local(float x,float y) const { return {heading.x*x-heading.y*y,heading.y*x+heading.x*y}; }
     V bodyLocal(float x,float y) const {
         return local(x*std::cos(bodyYaw)-y*std::sin(bodyYaw),x*std::sin(bodyYaw)+y*std::cos(bodyYaw));
     }
-    V hip(int i) const { return pos+bodyOffset+bodyLocal((13-i%4*8)*scale,(i<4?-5.f:5.f)*scale); }
-    std::array<V,5> restingChain(int i) const {
+    std::array<V,LEG_JOINTS> neutralChain(int i) const {
         int row=i%4,side=i<4?-1:1;
         float forward=row<2?1.f:-1.f;
-        V h=hip(i), f=home(i);
-        V shoulder=h+bodyLocal(forward*2*scale,side*4*scale);
-        V reach=unit(f-shoulder),outward{-reach.y,reach.x};
-        // Two long, gently bowed sections follow the body-to-foot direction.
-        // Preserve reach by spreading the contacts, not by pushing the knee
-        // past the foot into a permanent zigzag. Mirror front/rear and sides.
-        V knee=mix(shoulder,f,.48f)+outward*(side*forward*16*scale);
-        V distal=unit(f-knee);float turn=side*.10f;
-        V toeDirection{distal.x*std::cos(turn)-distal.y*std::sin(turn),
-                       distal.x*std::sin(turn)+distal.y*std::cos(turn)};
-        // A short distal foot continues the shin with a slight mirrored bend.
-        // Its joint stays before the contact, rather than overshooting the toe
-        // and folding back into the conspicuous hook of the old silhouette.
-        V ankle=f-toeDirection*(8*scale);
-        return {h,shoulder,knee,ankle,f};
+        // Robinson & Robinson (1973), Table 1: adult female N. pilipes
+        // (then N. maculata), bilateral means normalized to leg I.
+        static constexpr float ratios[]={1.f,.8254f,.4796f,.832f};
+        // Harvey et al. (2007): female leg I, femur through tarsus (mm).
+        // The combined root and projected resting angles are artistic choices;
+        // posture never changes these physical lengths.
+        static constexpr float segments[]={4.f,21.10f,3.98f,18.03f,16.38f,4.65f};
+        static constexpr float directions[]={25.f,60.f,115.f,165.f};
+        static constexpr float roots[]={70.f,85.f,105.f,120.f};
+        // Bent main sections provide useful contraction/extension reserve;
+        // distal sections continue smoothly rather than folding into hooks.
+        static constexpr float bends[]={0.f,.55f,.20f,-.65f,-.55f,-.50f};
+        std::array<V,LEG_JOINTS> chain{};
+        for(int j=0;j<LEG_SEGMENTS;++j) {
+            float angle=side*(directions[row]*PI/180+forward*bends[j]);
+            if(j==0) angle=side*roots[row]*PI/180;
+            float extent=segments[j]*(160.f/68.14f)*ratios[row]*scale;
+            chain[j+1]=chain[j]+V{std::cos(angle),std::sin(angle)}*extent;
+        }
+        return chain;
+    }
+    std::array<V,LEG_JOINTS> restingChain(int i) const {
+        auto chain=neutralChain(i);
+        for(auto& p:chain) p=pos+local(p.x,p.y);
+        return chain;
     }
     V home(int i) const {
-        int side=i<4?-1:1, row=i%4;
-        static const float xs[]={108,43,-45,-112};
-        static const float ys[]={104,136,136,105};
+        V neutral=neutralChain(i)[FOOT];
         float stance=living?mind.stance:1.f;
-        float x=xs[row]*scale,y=ys[row]*side*scale*stance;
+        float x=neutral.x,y=neutral.y*stance;
         return pos+V{aimHeading.x*x-aimHeading.y*y,aimHeading.y*x+aimHeading.x*y};
     }
     void resetFeet() {
         grabbed=-1; airborne=0; hovered=-1;
+        escapeTurning=false;
+        velocity={}; angularSpeed=0;
         toeOffsets={};
         if(hwnd) UnregisterHotKey(hwnd,3);
         aimHeading=heading;
@@ -344,17 +360,23 @@ public:
         physics.bone(0,1); physics.bone(0,2); physics.bone(1,2);
         for(int i=0;i<8;++i) {
             auto& l=legs[i]; l.joints=restingChain(i); l.previous=l.joints;
+            l.foot=l.from=l.goal=l.joints[FOOT];
             l.joints[0]=pos; l.ids[0]=0;
-            for(int j=1;j<5;++j) l.ids[j]=physics.add(l.joints[j],j==4?0.f:1.f);
-            for(int j=0;j<4;++j) {
+            for(int j=1;j<LEG_JOINTS;++j) l.ids[j]=physics.add(l.joints[j],j==FOOT?0.f:1.f);
+            for(int j=0;j<LEG_SEGMENTS;++j) {
                 physics.bone(l.ids[j],l.ids[j+1]);
                 l.bones[j]=length(l.joints[j+1]-l.joints[j]);
             }
-            // Angular constraints couple the entire four-segment leg to the torso.
+            // Each anatomical section transmits contact forces to the torso.
             physics.bend(1,0,l.ids[1],.075f);
-            physics.bend(l.ids[0],l.ids[1],l.ids[2],.045f);
-            physics.bend(l.ids[1],l.ids[2],l.ids[3],.012f);
-            physics.bend(l.ids[2],l.ids[3],l.ids[4],.025f);
+            physics.bend(l.ids[0],l.ids[1],l.ids[2],.06f);
+            physics.bend(l.ids[1],l.ids[2],l.ids[3],.10f);
+            physics.bend(l.ids[2],l.ids[3],l.ids[4],.10f);
+            physics.bend(l.ids[3],l.ids[4],l.ids[5],.08f);
+            physics.bend(l.ids[4],l.ids[5],l.ids[6],.08f);
+            // A very short patella must not become a hinge that allows the
+            // femur and tibia to buckle into a hairpin under planted contacts.
+            physics.bend(l.ids[1],l.ids[2],l.ids[4],.25f);
         }
         stepCooldown=0; legCursor=0;
     }
@@ -385,13 +407,16 @@ public:
         float dt=std::min(.05f,std::chrono::duration<float>(now-last).count()); last=now;
         POINT cursor; GetCursorPos(&cursor);
         V currentCursor{float(cursor.x),float(cursor.y)};
-        sensedCursorVelocity={};
-        if(cursorPrimed && dt>.001f) {
-            sensedCursorVelocity=(currentCursor-previousCursor)*(1/dt);
+        cursorSampleAge+=dt;
+        if(!cursorPrimed) {
+            previousCursor=currentCursor;cursorPrimed=true;cursorSampleAge=0;
+        } else if(cursorSampleAge>=1.f/120) {
+            sensedCursorVelocity=(currentCursor-previousCursor)*(1/cursorSampleAge);
             float measured=length(sensedCursorVelocity);
-            sensedCursorSpeed+=(measured-sensedCursorSpeed)*(1-std::exp(-dt*12));
+            sensedCursorSpeed+=(measured-sensedCursorSpeed)*(1-std::exp(-cursorSampleAge*12));
+            previousCursor=currentCursor;cursorSampleAge=0;
         }
-        previousCursor=sensedCursor=currentCursor; cursorPrimed=true;
+        sensedCursor=currentCursor;
         if(feedingLive) food=feeder.read();
         trayTimer+=dt;
         if(living && tray.hWnd && trayTimer>1) {
@@ -414,7 +439,15 @@ public:
     void advance(float dt) {
         elapsed+=dt;
         if(living) {
+            bool eatingBefore=mind.state==CreatureMind::State::Eat;
+            // Turning does not consume the time reserved for running away.
+            if(escapeTurning && mind.state==CreatureMind::State::Flee) mind.deadline+=dt;
             mind.update(dt,senses());
+            if(!eatingBefore && mind.state==CreatureMind::State::Eat) {
+                for(auto& l:legs) {l.foot=l.from=l.goal=l.joints[FOOT];l.phase=1;l.lift=0;}
+                for(auto& p:physics.particles) p.old=p.p;
+                velocity={};toeOffsets={};
+            }
             memoryTimer+=dt;
             if(memoryTimer>20 || (memoryDirty && memoryTimer>2)) { memoryTimer=0; memoryDirty=false; saveMemory(); }
         }
@@ -434,31 +467,77 @@ public:
         else if(length(target-pos)<18) { rest=random(.6f,2.4f); walking=false; }
         float angle=std::atan2(aimHeading.y,aimHeading.x);
         float wanted=std::atan2(target.y-pos.y,target.x-pos.x);
-        // Steering chooses future contacts only. It never translates the torso.
+        // Turn in place before translating along the body axis.
         float diff=std::remainder(wanted-angle,2*PI);
         bool fleeing=living && mind.state==CreatureMind::State::Flee;
+        bool seekingFood=living && mind.state==CreatureMind::State::SeekFood;
+        float escapeError=std::remainder(wanted-std::atan2(heading.y,heading.x),2*PI);
+        bool pivoting=walking && !seekingFood && std::abs(escapeError)>(escapeTurning?.12f:.35f);
+        if(pivoting && fleeing) mind.deadline=std::max(mind.deadline,mind.age+.8f);
+        if(pivoting && !escapeTurning) {
+            // Keep existing contacts and finish any stride already in flight.
+            velocity={};stepCooldown=0;angularSpeed=0;
+        }
+        escapeTurning=pivoting;
+        if(pivoting) {
+            // Rotate only while feet are actively repositioning. Grounded
+            // contacts remain in world space; never rotate the entire pose.
+            float support=0;
+            for(const auto& l:legs) if(l.phase<1) support+=std::sin(PI*l.phase);
+            float limit=fleeing?7.6f:1.3f;
+            float desiredTurn=std::clamp(escapeError*(fleeing?10.f:3.f),-limit,limit)*std::min(1.f,support);
+            angularSpeed+=(desiredTurn-angularSpeed)*(1-std::exp(-dt*(fleeing?24.f:12.f)));
+            float rotation=angularSpeed*dt;
+            // A planted foot near the head's centerline needs a new contact
+            // before further yaw can safely carry its root around the torso.
+            for(int i=0;i<8;++i) {
+                const auto& l=legs[i];
+                V arm=l.foot-pos;
+                float sideAngle=std::atan2(heading.x*arm.y-heading.y*arm.x,heading.x*arm.x+heading.y*arm.y);
+                float side=i<4?-1.f:1.f;
+                float margin=std::asin(std::min(.95f,16*scale/std::max(1.f,length(arm))));
+                float signedAngle=side*sideAngle;
+                float lower=std::min(0.f,signedAngle-PI+margin),upper=std::max(0.f,signedAngle-margin);
+                rotation=side*std::clamp(side*rotation,lower,upper);
+            }
+            float c=std::cos(rotation),sn=std::sin(rotation);
+            heading={heading.x*c-heading.y*sn,heading.x*sn+heading.y*c};
+            aimHeading=heading;if(pivoting) velocity={};
+        }
         float turnLimit=fleeing?3.8f:1.65f;
-        float turn=walking?std::clamp(diff*(fleeing?5.f:3.f),-turnLimit,turnLimit):0;
-        angularSpeed+=(turn-angularSpeed)*(1-std::exp(-dt*5));
-        angle+=angularSpeed*dt;
-        aimHeading={std::cos(angle),std::sin(angle)};
+        float turn=walking && !fleeing?std::clamp(diff*3.f,-turnLimit,turnLimit):0;
+        if(!pivoting && !fleeing) {
+            angularSpeed+=(turn-angularSpeed)*(1-std::exp(-dt*5));
+            angle+=angularSpeed*dt;
+            aimHeading={std::cos(angle),std::sin(angle)};
+        }
         float arrival=std::clamp(length(target-pos)/100.f,.18f,1.f);
         float alignment=std::clamp(std::cos(diff),.12f,1.f);
-        float pace=1+.09f*std::sin(elapsed*1.7f)+.04f*std::sin(elapsed*3.1f);
-        bool seekingFood=living && mind.state==CreatureMind::State::SeekFood;
-        V travelDirection=fleeing||seekingFood?unit(target-pos):aimHeading;
-        float travelFactor=fleeing?1.f:seekingFood?std::clamp(length(target-pos)/90.f,.04f,1.f):arrival*alignment;
-        V desired=walking?travelDirection*(effectiveSpeed*travelFactor*pace):V{};
-        velocity=mix(velocity,desired,1-std::exp(-dt*(fleeing?14.f:4.f)));
+        float pace=1;
+        V travelDirection=seekingFood?unit(target-pos):heading;
+        float travelFactor=fleeing || (living && mind.state==CreatureMind::State::Explore)?1.f:seekingFood?std::clamp(length(target-pos)/90.f,.04f,1.f):arrival*alignment;
+        V desired=walking && !pivoting?travelDirection*(effectiveSpeed*travelFactor*pace):V{};
+        bool inspecting=living && mind.state==CreatureMind::State::Explore && mind.inspecting;
+        bool quickRoam=living && mind.state==CreatureMind::State::Explore && mind.quickBout && !inspecting;
+        velocity=mix(velocity,desired,1-std::exp(-dt*(fleeing?14.f:inspecting||quickRoam?12.f:4.f)));
+        if(inspecting && length(velocity)<.8f) velocity={};
+        if(fleeing) velocity=pivoting?V{}:heading*length(velocity);
+        // Locomotion owns a smooth torso trajectory. Feet articulate around
+        // it; their constraint corrections cannot shake the body anymore.
+        V next=pos+velocity*dt;
+        float bodyInset=35*scale;
+        next.x=std::clamp(next.x,work.left+bodyInset,work.right-bodyInset);
+        next.y=std::clamp(next.y,work.top+bodyInset,work.bottom-bodyInset);
+        pos=next;
         stepCooldown-=dt;
         int swinging=0;
         for(int i=0;i<8;++i) {
             auto& l=legs[i];
             if(l.phase<1) {
                 l.phase=std::min(1.f,l.phase+dt/l.duration);
-                float t=l.phase*l.phase*(3-2*l.phase);
+                float t=l.phase*l.phase*l.phase*(10+l.phase*(-15+6*l.phase));
                 l.foot=mix(l.from,l.goal,t);
-                l.lift=std::pow(std::max(0.f,std::sin(PI*l.phase)),.8f);
+                float lift=std::max(0.f,std::sin(PI*l.phase));l.lift=lift*lift;
                 if(l.phase<1) ++swinging;
                 else l.lift=0;
             }
@@ -466,10 +545,37 @@ public:
         // Reference crawl order: (legIndex * 3) % 8, with its interleaved
         // left/right indices converted to this renderer's two groups of four.
         int candidate=-1;
-        if(walking && swinging<3 && stepCooldown<=0) {
-            int interleaved=((legCursor++)*3)%8;
-            candidate=interleaved/2+(interleaved%2)*4;
-            if(legs[candidate].phase<1) candidate=-1;
+        bool urgentStep=false;
+        if(walking && swinging<4) {
+            float urgency=1;
+            V predicted=pos+velocity*.12f;
+            for(int i=0;i<8;++i) if(legs[i].phase>=1) {
+                float span=0;for(float b:legs[i].bones) span+=b;
+                float distance=length(legs[i].foot-predicted);
+                float score=std::max(distance/(span*.91f),span*.48f/std::max(1.f,distance));
+                if(score>urgency) {urgency=score;candidate=i;urgentStep=true;}
+            }
+            // Translate supports in the same interleaved cycle; prioritizing
+            // short legs repeatedly would leave the long ones behind.
+            if(candidate<0 && stepCooldown<=0) {
+                int interleaved=((legCursor++)*3)%8;
+                candidate=interleaved/2+(interleaved%2)*4;
+                if(legs[candidate].phase<1) candidate=-1;
+            }
+            if(pivoting && stepCooldown<=0) {
+                float furthest=0;candidate=-1;
+                for(int i=0;i<8;++i) if(legs[i].phase>=1) {
+                    auto neutral=neutralChain(i)[FOOT];
+                    float lead=fleeing?.7f:.28f;
+                    float rotation=std::atan2(heading.y,heading.x)+std::clamp(escapeError,-lead,lead);
+                    V turningContact=pos+V{neutral.x*std::cos(rotation)-neutral.y*std::sin(rotation),
+                                    neutral.x*std::sin(rotation)+neutral.y*std::cos(rotation)};
+                    V attainable=contactInSector(i,turningContact,true);
+                    float distance=length(attainable-legs[i].foot);
+                    float score=distance/std::max(1.f,length(neutral));
+                    if(distance>2*scale && score>furthest) {furthest=score;candidate=i;}
+                }
+            }
         }
         // A newly resting or recently dropped creature places its feet one by one.
         // This changes actual contacts through the same solver as normal walking.
@@ -484,16 +590,29 @@ public:
         }
         if(candidate>=0) {
             auto& l=legs[candidate];
-            l.duration=std::clamp(.29f-effectiveSpeed*.0008f,.13f,.28f)+random(-.015f,.015f);
-            l.from=living?l.joints[4]:l.foot;
-            // The web in the reference supplies discrete anchor particles. Use an
-            // invisible desktop contact lattice, biased toward the roaming target.
+            l.duration=std::clamp(.26f-effectiveSpeed*.00065f,.12f,.25f);
+            if(candidate%4==2) l.duration*=.85f;
+            if(fleeing || seekingFood) l.duration=.12f;
+            if(urgentStep) l.duration=fleeing?.065f:.09f;
+            if(pivoting) l.duration=fleeing?.055f:.19f;
+            else if(quickRoam) l.duration=.065f;
+            l.from=living?l.joints[FOOT]:l.foot;
+            // Desktop contacts are continuous: rounding and fresh random
+            // offsets on every step made contacts jump between lattice cells.
             bool precise=seekingFood && length(target-pos)<80*scale;
-            V desiredContact=home(candidate)+(walking?velocity*(fleeing||precise?.34f:.58f):V{});
-            float scatter=precise?2.f:10.f;
-            desiredContact=desiredContact+V{random(-scatter,scatter),random(-scatter,scatter)}*scale;
-            float grid=(precise?2.f:10.f)*scale;
-            l.goal={std::round(desiredContact.x/grid)*grid,std::round(desiredContact.y/grid)*grid};
+            // Rebuild supports relative to the torso each cycle; accumulating
+            // translations would eventually bunch every foot ahead of it.
+            V neutral=neutralChain(candidate)[FOOT];
+            V support=pos+local(neutral.x,neutral.y);
+            V desiredContact=walking?support+velocity*.34f:home(candidate);
+            if(pivoting) {
+                float lead=fleeing?.7f:.28f;
+                float rotation=std::atan2(heading.y,heading.x)+std::clamp(escapeError,-lead,lead);
+                desiredContact=pos+V{neutral.x*std::cos(rotation)-neutral.y*std::sin(rotation),
+                                    neutral.x*std::sin(rotation)+neutral.y*std::cos(rotation)};
+            }
+            l.goal=desiredContact;
+            l.goal=contactInSector(candidate,l.goal,true);
             if(living) {
                 float inset=20*scale;
                 l.goal.x=std::clamp(l.goal.x,work.left+inset,work.right-inset);
@@ -506,39 +625,212 @@ public:
             V reach=l.goal-landingCenter;
             float maxReach=0; for(float bone:l.bones) maxReach+=bone;
             if(length(reach)>maxReach*.98f) l.goal=landingCenter+unit(reach)*(maxReach*.98f);
-            l.phase=0; l.lift=0;
-            stepCooldown=walking?random(.085f,.145f)*75.f/std::max(15.f,effectiveSpeed):.16f;
+            // Walking uses foreshortened leg projections, allowing a broad
+            // contact workspace without bending the distal sections backward.
+            else if(walking && length(reach)<maxReach*.45f)
+                l.goal=landingCenter+unit(reach)*(maxReach*.45f);
+            float minimumStep=(precise?.2f:pivoting?2.f:fleeing||seekingFood?4.f:8.f)*scale;
+            if(length(l.goal-l.from)>=minimumStep) {
+                l.phase=0;l.lift=0;
+                stepCooldown=walking?std::clamp(.085f*75.f/std::max(15.f,effectiveSpeed),.045f,.18f):.16f;
+                if(fleeing) stepCooldown=.045f;
+                else if(seekingFood) stepCooldown=.055f;
+                if(pivoting) stepCooldown=fleeing?.0175f:.065f;
+            } else {l.goal=l.foot;stepCooldown=.025f;}
         }
         solveLegs(dt);
+        if(!fleeing && !seekingFood) velocity=heading*length(velocity);
+    }
+    void rotatePose(float radians) {
+        float c=std::cos(radians),s=std::sin(radians);
+        auto vector=[&](V p){return V{c*p.x-s*p.y,s*p.x+c*p.y};};
+        auto point=[&](V p){return pos+vector(p-pos);};
+        for(auto& p:physics.particles) {p.p=point(p.p);p.old=point(p.old);}
+        for(auto& leg:legs) {
+            leg.foot=point(leg.foot);leg.from=point(leg.from);leg.goal=point(leg.goal);
+            for(auto& p:leg.joints) p=point(p);
+            for(auto& p:leg.previous) p=point(p);
+        }
+        for(auto& offset:toeOffsets) offset=vector(offset);
+        heading=vector(heading);
+    }
+    V contactInSector(int leg,V point,bool contact=false) const {
+        V center=physics.particles[0].p;
+        V ray=physics.particles[legs[leg].ids[FOOT]].p-center;
+        float lower=-PI,upper=PI;
+        for(int i=0;i<8;++i) if(i!=leg) {
+            V other=physics.particles[legs[i].ids[FOOT]].p-center;
+            float gap=CrawlPhysics::angle(ray,other);
+            if(gap>0) upper=std::min(upper,gap*.45f);
+            else lower=std::max(lower,gap*.45f);
+        }
+        V offset=point-center;
+        float angle=std::atan2(ray.y,ray.x)+std::clamp(CrawlPhysics::angle(ray,offset),lower,upper);
+        float radius=length(offset);
+        V result=center+V{std::cos(angle),std::sin(angle)}*radius;
+        V axis=unit(physics.particles[1].p-center),side{-axis.y,axis.x};
+        float sign=leg<4?-1.f:1.f;
+        V offsetResult=result-center;
+        float lateral=(offsetResult.x*side.x+offsetResult.y*side.y)*sign;
+        if(contact && lateral<10*scale) result=result+side*(sign*(10*scale-lateral));
+        return result;
+    }
+    void constrainAnatomy(bool lanes) {
+        for(int pass=0;pass<80;++pass) {
+            for(const auto& b:physics.bones) physics.solveBone(b);
+            for(const auto& leg:legs) for(int j=4;j<FOOT;++j) {
+                int a=leg.ids[j-1],b=leg.ids[j],c=leg.ids[j+1];
+                V before=physics.particles[b].p-physics.particles[a].p;
+                V after=physics.particles[c].p-physics.particles[b].p;
+                float deflection=CrawlPhysics::angle(before,after);
+                float limit=(j==FOOT-1?35.f:45.f)*PI/180;
+                if(std::abs(deflection)>limit) {
+                    float bendTarget=std::remainder(PI+std::clamp(deflection,-limit,limit),2*PI);
+                    physics.solveBend({a,b,c,bendTarget,.8f,bendTarget});
+                }
+            }
+            V center=physics.particles[0].p;
+            V axis=unit(physics.particles[1].p-center),across{-axis.y,axis.x};
+            for(int i=0;i<8;++i) {
+                float sign=i<4?-1.f:1.f;
+                V normal=across*sign;
+                for(int j=1;j<=FOOT;++j) {
+                    auto& p=physics.particles[legs[i].ids[j]];
+                    auto& torso=physics.particles[0];
+                    auto& head=physics.particles[1];
+                    float torsoLength=std::max(scale,length(head.p-torso.p));
+                    V forward=unit(head.p-torso.p),side{-forward.y,forward.x};
+                    V offset=p.p-torso.p;
+                    float raw=offset.x*side.x+offset.y*side.y;
+                    float lateral=raw*sign;
+                    static constexpr float rootMargin[]={8.f,5.f,2.f,3.f};
+                    float minimum=(j==1?rootMargin[i%4]:8.5f)*scale;
+                    V gp=side*sign;
+                    V gh=(V{offset.y,-offset.x}-forward*raw)*(sign/torsoLength);
+                    V gc=(gp+gh)*-1;
+                    auto squared=[](V v){return v.x*v.x+v.y*v.y;};
+                    float weight=p.mass*squared(gp)+torso.mass*squared(gc)+head.mass*squared(gh);
+                    if(lateral<minimum && weight>0) {
+                        float correction=(minimum-lateral)/weight;
+                        p.p=p.p+gp*(correction*p.mass);
+                        torso.p=torso.p+gc*(correction*torso.mass);
+                        head.p=head.p+gh*(correction*head.mass);
+                    }
+                }
+                if(lanes) for(int j=2;j<FOOT;++j) {
+                    auto& p=physics.particles[legs[i].ids[j]];
+                    V projected=contactInSector(i,p.p);
+                    V shift=projected-p.p;p.p=projected;p.old=p.old+shift;
+                }
+                // Protect the entire segment, not just its endpoints: a long
+                // femur could otherwise cut straight across the head circle.
+                for(int j=0;j<FOOT;++j) {
+                    auto& a=physics.particles[legs[i].ids[j]];
+                    auto& b=physics.particles[legs[i].ids[j+1]];
+                    auto& headParticle=physics.particles[1];
+                    V head=headParticle.p,segment=b.p-a.p,from=head-a.p;
+                    float squared=segment.x*segment.x+segment.y*segment.y;
+                    float t=squared>.001f?std::clamp((from.x*segment.x+from.y*segment.y)/squared,0.f,1.f):0;
+                    V offset=mix(a.p,b.p,t)-head;
+                    float distance=length(offset),r=8.5f*scale;
+                    float weight=a.mass*(1-t)*(1-t)+b.mass*t*t+headParticle.mass;
+                    if(distance<r && weight>.001f) {
+                        V outward=distance>.001f?offset*(1/distance):normal;
+                        V push=outward*std::min((r-distance)/weight,2*scale);
+                        a.p=a.p+push*(a.mass*(1-t));b.p=b.p+push*(b.mass*t);
+                        headParticle.p=headParticle.p-push*headParticle.mass;
+                    }
+                }
+            }
+        }
+    }
+    int exposedLegCrossings() const {
+        auto cross=[](V a,V b){return a.x*b.y-a.y*b.x;};
+        int count=0;
+        for(int a=0;a<8;++a) for(int b=a+1;b<8;++b)
+            for(int j=1;j<LEG_SEGMENTS;++j) for(int k=1;k<LEG_SEGMENTS;++k) {
+                V start=legs[a].joints[j],other=legs[b].joints[k];
+                V u=legs[a].joints[j+1]-start,v=legs[b].joints[k+1]-other;
+                float denominator=cross(u,v);
+                if(std::abs(denominator)<.001f) continue;
+                float t=cross(other-start,v)/denominator,s=cross(other-start,u)/denominator;
+                if(t>.001f && t<.999f && s>.001f && s<.999f
+                   && length(start+u*t-pos)>26*scale) ++count;
+            }
+        return count;
+    }
+    std::array<float,2> legClearance() const {
+        std::array<float,2> result{10000,10000};
+        V across{-heading.y,heading.x},head=physics.particles[1].p;
+        for(int i=0;i<8;++i) for(int j=1;j<=FOOT;++j) {
+            V offset=legs[i].joints[j]-pos;
+            result[0]=std::min(result[0],(offset.x*across.x+offset.y*across.y)*(i<4?-1:1)/scale);
+            V start=legs[i].joints[j-1],segment=legs[i].joints[j]-start,from=head-start;
+            float square=segment.x*segment.x+segment.y*segment.y;
+            float t=square>.001f?std::clamp((from.x*segment.x+from.y*segment.y)/square,0.f,1.f):0;
+            result[1]=std::min(result[1],length(start+segment*t-head)/scale);
+        }
+        return result;
+    }
+    float distalFold() const {
+        float result=0;
+        for(const auto& leg:legs) for(int j=4;j<FOOT;++j)
+            result=std::max(result,std::abs(CrawlPhysics::angle(leg.joints[j]-leg.joints[j-1],leg.joints[j+1]-leg.joints[j]))*180/PI);
+        return result;
     }
     void solveLegs(float dt) {
-        // Only feet are pinned. All torso and leg joints remain free particles,
-        // so changing a foot contact pulls the body through the constraint graph.
+        physics.pin(0,pos);
+        physics.pin(1,pos+local(12*scale,0));
+        physics.pin(2,pos+local(-19*scale,0));
+        // Walking uses a variable-length planar projection of the raised legs.
+        // Nominal bones remain unchanged for the free drag/throw simulation.
         for(int i=0;i<8;++i) {
             auto& l=legs[i];
-            int side=i<4?-1:1;
-            V toe=l.foot+local(0,-side*5*l.lift*scale)+V{0,-11*l.lift*scale};
+            V toe=l.foot;
             if(living) {
                 V desiredOffset=l.phase>=1 && hovered!=i?mind.toeMotion(i,heading)*scale:V{};
                 toeOffsets[i]=mix(toeOffsets[i],desiredOffset,1-std::exp(-dt*14));
-                if(l.phase>=1) toe=toe+toeOffsets[i];
+                if(l.phase>=1) toe=contactInSector(i,toe+toeOffsets[i],true);
             }
-            physics.pin(l.ids[4],toe);
+            auto neutral=neutralChain(i);
+            V root=pos+local(neutral[1].x,neutral[1].y),reach=toe-root;
+            V direction=unit(reach),across{-direction.y,direction.x};
+            float sign=(i<4?-1.f:1.f)*(i%4<2?1.f:-1.f);
+            float span=0;for(int j=1;j<LEG_SEGMENTS;++j) span+=l.bones[j];
+            float along=0,bow=std::min(8*scale,length(reach)*.08f);
+            l.joints[0]=pos;l.joints[1]=root;
+            for(int j=2;j<=FOOT;++j) {
+                along+=l.bones[j-1];float t=along/span;
+                l.joints[j]=root+reach*t+across*(sign*bow*std::sin(PI*t));
+            }
+            l.joints[FOOT]=toe;
+            for(int j=0;j<LEG_JOINTS;++j) physics.pin(l.ids[j],l.joints[j]);
         }
-        if(living) {
-            float look=std::remainder(std::atan2(mind.attention.y-pos.y,mind.attention.x-pos.x)-std::atan2(heading.y,heading.x),2*PI);
-            look=std::clamp(look,-.7f,.7f);
-            for(size_t n=0;n<physics.bends.size();++n) {
-                auto& b=physics.bends[n];
-                float breath=.006f*std::sin(elapsed*2.2f+n/4.f);
-                float desired=b.neutral+breath-(n%4==0 && !mind.moving?look*.12f:0.f);
-                b.rest+=(desired-b.rest)*.05f;
+        for(int pass=0;pass<8;++pass) for(int i=0;i<8;++i) {
+            V side=local(0,i<4?-1.f:1.f);
+            for(int j=2;j<FOOT;++j) {
+                auto& p=physics.particles[legs[i].ids[j]];
+                V projected=contactInSector(i,p.p);
+                float y=(projected.x-pos.x)*side.x+(projected.y-pos.y)*side.y;
+                if(y<9*scale) projected=projected+side*(9*scale-y);
+                physics.pin(legs[i].ids[j],projected);
+            }
+            for(int j=1;j<FOOT;++j) {
+                auto& a=physics.particles[legs[i].ids[j]];
+                auto& b=physics.particles[legs[i].ids[j+1]];
+                V segment=b.p-a.p,from=physics.particles[1].p-a.p;
+                float square=segment.x*segment.x+segment.y*segment.y;
+                float t=square>.001f?std::clamp((from.x*segment.x+from.y*segment.y)/square,0.f,1.f):0;
+                V offset=mix(a.p,b.p,t)-physics.particles[1].p;
+                float distance=length(offset),wa=j==1?0.f:1.f,wb=j+1==FOOT?0.f:1.f;
+                float weight=wa*(1-t)*(1-t)+wb*t*t;
+                if(distance<8.5f*scale && weight>.001f) {
+                    V correction=unit(offset)*((8.5f*scale-distance)/weight);
+                    a.p=a.p+correction*(wa*(1-t));b.p=b.p+correction*(wb*t);
+                }
             }
         }
-        physics.step(dt);
-        pos=physics.particles[0].p;
-        heading=unit(physics.particles[1].p-pos);
-        for(auto& l:legs) for(int j=0;j<5;++j) l.joints[j]=physics.particles[l.ids[j]].p;
+        for(auto& l:legs) for(int j=0;j<LEG_JOINTS;++j) l.joints[j]=physics.particles[l.ids[j]].p;
     }
     Color pigment(int segment=0) const {
         if(!rainbow) {
@@ -555,9 +847,20 @@ public:
         return Color(255,BYTE((r+.18f)*255*shade),BYTE((g+.18f)*255*shade),BYTE((b+.18f)*255*shade));
     }
     Color bodyPigment(int part) const {
-        if(rainbow)return pigment(part==0?0:1);
         static const Color shellColors[]={Color(255,170,132,78),Color(255,110,78,46),Color(255,78,57,38)};
-        return shellColors[std::clamp(part,0,2)];
+        Color base=rainbow?pigment(part==0?0:1):shellColors[std::clamp(part,0,2)];
+        // Hunger changes the body, not the legs or the locomotion speed.
+        float fullness=mind.fullness();
+        static const Color fedColors[]={Color(255,36,29,24),Color(255,26,23,20),Color(255,18,17,16)};
+        Color fed=fedColors[std::clamp(part,0,2)];
+        auto darken=[&](BYTE value,BYTE dark) {return BYTE(value*(1-fullness)+dark*fullness);};
+        base=Color(base.GetA(),darken(base.GetR(),fed.GetR()),darken(base.GetG(),fed.GetG()),darken(base.GetB(),fed.GetB()));
+        float hunger=std::clamp((mind.hunger-80.f)/20.f,0.f,1.f);
+        hunger=hunger*hunger*(3-2*hunger);
+        BYTE gray=BYTE(base.GetR()*.30f+base.GetG()*.59f+base.GetB()*.11f);
+        float fade=hunger*.8f;
+        auto channel=[&](BYTE value) {return BYTE(value*(1-fade)+(gray*.75f+62)*fade);};
+        return Color(base.GetA(),channel(base.GetR()),channel(base.GetG()),channel(base.GetB()));
     }
     void line(Graphics& g,V a,V b,Color c,float w) {
         Pen pen(c,w*scale); pen.SetStartCap(LineCapRound); pen.SetEndCap(LineCapRound);
@@ -570,17 +873,23 @@ public:
         auto screen=[&](V p) { return p-pos+origin; };
         V center=origin+bodyOffset;
         for(int i=0;i<8;++i) {
-            static const float widths[]={3.8f,3.f,2.f,.95f};
-            for(int j=0;j<4;++j) {
-                V a=screen(legs[i].joints[j]),b=screen(legs[i].joints[j+1]);
+            auto visualJoint=[&](int j) {
+                V p=screen(legs[i].joints[j]);
+                p.y-=3*scale*legs[i].lift*std::max(0,j-2)/float(FOOT-2);
+                return p;
+            };
+            static const float widths[]={3.8f,3.f,2.8f,2.2f,1.5f,.95f};
+            static const int shades[]={0,1,1,2,2,3};
+            for(int j=0;j<LEG_SEGMENTS;++j) {
+                V a=visualJoint(j),b=visualJoint(j+1);
                 // A fine shadow keeps the colored silhouette visible on light windows.
                 line(g,a+V{.7f,1.2f},b+V{.7f,1.2f},Color(90,8,13,19),widths[j]+1);
-                line(g,a,b,pigment(j),widths[j]);
-                if(!rainbow&&(j==1||j==2))for(float start:{.40f,.72f})
+                line(g,a,b,pigment(shades[j]),widths[j]);
+                if(!rainbow&&(j==1||j==3||j==4))for(float start:{.40f,.72f})
                     line(g,mix(a,b,start),mix(a,b,start+.09f),Color(245,64,49,34),widths[j]*1.04f);
-                if(j>0) dot(g,a,widths[j]*.58f,pigment(j));
+                if(j>0) dot(g,a,widths[j]*.58f,pigment(shades[j]));
             }
-            V toe=screen(legs[i].joints[4]);
+            V toe=visualJoint(FOOT);
             dot(g,toe,1.35f,pigment(3));
             if(i==hovered || i==grabbed) {
                 Pen ring(Color(i==grabbed?230:150,235,245,255),1.2f);
@@ -589,20 +898,49 @@ public:
             }
         }
         V abdomen=screen(physics.particles[2].p),head=screen(physics.particles[1].p);
-        // Three round body masses match the reference's small organic silhouette.
-        line(g,abdomen,head,bodyPigment(1),5);
-        dot(g,abdomen+V{1,1},10.3f,Color(100,7,10,17));
-        float breath=living?1+.025f*std::sin(elapsed*2.2f):1.f;
-        dot(g,abdomen,10*breath,bodyPigment(0));
+        constexpr float bodySize=1.25f;
+        float bodyScale=scale*bodySize;
+        line(g,abdomen,head,bodyPigment(1),5*bodySize);
+        float breath=living && !mind.moving?1+.025f*std::sin(elapsed*2.2f):1.f;
+        V abdomenAxis=unit(head-abdomen),abdomenAcross{-abdomenAxis.y,abdomenAxis.x};
+        for(bool shadow:{true,false}) {
+            auto point=[&](float x,float y) {
+                V p=abdomen+(abdomenAxis*x+abdomenAcross*y)*(bodyScale*breath);
+                if(shadow) p=p+V{1,1};
+                return PointF(p.x,p.y);
+            };
+            GraphicsPath shell;
+            shell.AddBezier(point(10,0),point(11,5),point(8,8),point(3,9));
+            shell.AddBezier(point(3,9),point(-6,11),point(-17,6),point(-22,0));
+            shell.AddBezier(point(-22,0),point(-17,-6),point(-6,-11),point(3,-9));
+            shell.AddBezier(point(3,-9),point(8,-8),point(11,-5),point(10,0));
+            shell.CloseFigure();
+            SolidBrush fill(shadow?Color(100,7,10,17):bodyPigment(0));
+            g.FillPath(&fill,&shell);
+        }
         if(!rainbow) {
             V axis=unit(head-abdomen),across{-axis.y,axis.x};
-            line(g,abdomen-axis*(5*scale),abdomen+axis*(5*scale),Color(230,196,157,101),2.4f);
+            float marking=1-mind.fullness()*.85f;
+            line(g,abdomen-axis*(5*bodyScale),abdomen+axis*(5*bodyScale),Color(BYTE(230*marking),196,157,101),2.4f*bodySize);
             for(float x:{-3.f,0.f,3.f})for(int side:{-1,1})
-                line(g,abdomen+axis*(x*scale),abdomen+axis*((x-2)*scale)+across*(side*4*scale),Color(225,93,65,34),1.1f);
+                line(g,abdomen+axis*(x*bodyScale),abdomen+axis*((x-2)*bodyScale)+across*(side*4*bodyScale),Color(BYTE(225*marking),93,65,34),1.1f*bodySize);
         }
-        dot(g,center,5.5f,bodyPigment(1));dot(g,head,5,bodyPigment(2));
-        if(living) for(int side:{-1,1}) dot(g,head+local(3*scale,side*2*scale),.9f,rainbow?Color(220,20,30,40):Color(245,18,14,10));
-        dot(g,abdomen+bodyLocal(2*scale,-3*scale),2.8f,Color(45,255,255,255));
+        dot(g,center,5.5f*bodySize,bodyPigment(1));dot(g,head,5*bodySize,bodyPigment(2));
+        if(living) for(int side:{-1,1}) dot(g,head+local(3*bodyScale,side*2*bodyScale),.9f*bodySize,rainbow?Color(220,20,30,40):Color(245,18,14,10));
+        float gloss=mind.fullness();
+        V highlight=abdomen+bodyLocal(2*bodyScale,-3*bodyScale);
+        GraphicsPath shinePath;
+        shinePath.AddEllipse(highlight.x-3*bodyScale,highlight.y-2*bodyScale,6*bodyScale,4*bodyScale);
+        PathGradientBrush shineBrush(&shinePath);
+        shineBrush.SetCenterColor(Color(BYTE(45+100*gloss),245,248,255));
+        Color shineEdge(0,245,248,255);int shineEdges=1;
+        shineBrush.SetSurroundColors(&shineEdge,&shineEdges);
+        g.FillPath(&shineBrush,&shinePath);
+        if(gloss>0) {
+            V shine=abdomen+bodyLocal(-4*bodyScale,-4*bodyScale);
+            line(g,shine-bodyLocal(3*bodyScale,0),shine+bodyLocal(3*bodyScale,0),Color(BYTE(150*gloss),230,238,248),1.2f*bodySize);
+            dot(g,head+bodyLocal(0,-2*bodyScale),1.3f*bodySize,Color(BYTE(100*gloss),235,242,255));
+        }
         if(living && showHungerPanel) {
             RectF panel(origin.x-115,origin.y+38,230,48);
             SolidBrush background(Color(220,17,23,32)),text(Color(255,240,242,246));
@@ -620,7 +958,7 @@ public:
         }
         if(living && mind.state==CreatureMind::State::Eat) {
             float chew=std::sin(elapsed*14)*2;
-            for(int side:{-1,1}) line(g,head+local(5*scale,side*3*scale),head+local((12+chew)*scale,side*6*scale),pigment(),1.5f);
+            for(int side:{-1,1}) line(g,head+local(5*bodyScale,side*3*bodyScale),head+local((12+chew)*scale,side*6*scale),pigment(),1.5f);
             V morsel=head+local(16*scale,0);SolidBrush paper(Color(255,226,232,243));
             g.FillRectangle(&paper,morsel.x-3,morsel.y-4,6.f,8.f);
         }
@@ -750,12 +1088,26 @@ int motionTest(Spider& s) {
     s.living=false;
     s.rng.seed(42); s.follow=false; s.pos={900,700}; s.heading={1,0};
     s.work={0,0,1800,1400}; s.target={1600,700}; s.resetFeet();
-    // Causality regression: stationary contacts must not follow a scripted path;
-    // changing one contact must propagate to the free torso via constraints.
+    // Check the intended pair hierarchy and fixed anatomy across size/stance
+    // changes, rather than allowing a shorter foot radius to fold long bones.
+    int anatomyFailures=0;
+    for(float size:{.7f,1.f,1.3f}) for(float stance:{.7f,1.3f}) {
+        s.scale=size;s.living=true;s.mind.stance=stance;s.resetFeet();
+        float baseline=0;for(float b:s.legs[0].bones) baseline+=b;
+        const float expected[]={1.f,.83f,.48f,.83f};
+        for(int i=0;i<8;++i) {
+            float total=0;for(float b:s.legs[i].bones) total+=b;
+            if(std::abs(total/baseline-expected[i%4])>.01f) ++anatomyFailures;
+        }
+        if(std::abs(baseline-160*size)>.01f) ++anatomyFailures;
+    }
+    s.scale=1;s.living=false;s.resetFeet();
+    // Locomotion keeps the torso stable even when a contact is adjusted.
+    // Drag/throw retain the free-body solver in the interaction regression.
     for(int n=0;n<240;++n) s.solveLegs(1.f/120);
     float standingFold=0;
     for(const auto& leg:s.legs)
-        standingFold=std::max(standingFold,std::abs(CrawlPhysics::angle(leg.joints[2]-leg.joints[1],leg.joints[3]-leg.joints[2]))*180/PI);
+        standingFold=std::max(standingFold,std::abs(CrawlPhysics::angle(leg.joints[2]-leg.joints[1],leg.joints[4]-leg.joints[3]))*180/PI);
     V fixedStart=s.pos;
     for(int n=0;n<240;++n) s.solveLegs(1.f/120);
     float fixedBodyDrift=length(s.pos-fixedStart);
@@ -766,8 +1118,11 @@ int motionTest(Spider& s) {
     }
     float contactPull=length(s.pos-pullStart);
     s.pos={900,700}; s.heading={1,0}; s.resetFeet();
-    int steps=0, planted=0, maxSwing=0; float drift=0, maxReach=0, maxBoneError=0;
-    float bodyTravel=0,maxGroundedFold=0,groundedFoldSum=0;int groundedFoldSamples=0;
+    int steps=0, planted=0, maxSwing=0,maxCrossings=0; float drift=0, maxReach=0,minExtension=100,maxExtension=0;
+    float bodyTravel=0,maxGroundedFold=0,groundedFoldSum=0,maxTorsoError=0;int groundedFoldSamples=0;
+    V previousTravel{};float steadyTime=0,accelerationSquared=0,stepDistanceSum=0;
+    int accelerationSamples=0,microSteps=0;
+    float minSide=10000,minHead=10000,maxDistalFold=0;
     for(int frame=0;frame<3600;++frame) {
         if(frame==900) s.target={200,250};
         if(frame==1800) { s.speed=135; s.target={1500,1100}; }
@@ -775,24 +1130,41 @@ int motionTest(Spider& s) {
         auto before=s.legs;
         V beforeBody=s.pos;
         s.advance(1.f/120);
+        maxTorsoError=std::max(maxTorsoError,length(s.pos-beforeBody-s.velocity*(1.f/120)));
+        maxCrossings=std::max(maxCrossings,s.exposedLegCrossings());
+        maxDistalFold=std::max(maxDistalFold,s.distalFold());
+        auto clearance=s.legClearance();minSide=std::min(minSide,clearance[0]);minHead=std::min(minHead,clearance[1]);
         bodyTravel+=length(s.pos-beforeBody);
+        V travel=s.pos-beforeBody;
+        steadyTime=!s.escapeTurning && length(s.velocity)>20?steadyTime+1.f/120:0;
+        if(steadyTime>.4f) {
+            float acceleration=length(travel-previousTravel)*120*120;
+            accelerationSquared+=acceleration*acceleration;++accelerationSamples;
+        }
+        previousTravel=travel;
         int swinging=0,starts=0;
         for(int i=0;i<8;++i) {
             const auto& l=s.legs[i];
             if(l.phase<1) ++swinging;
-            if(before[i].phase>=1 && l.phase<1) { ++steps; ++starts; }
+            if(before[i].phase>=1 && l.phase<1) {
+                ++steps;++starts;float distance=length(l.goal-l.from)/s.scale;
+                stepDistanceSum+=distance;if(distance<8) ++microSteps;
+            }
             if(before[i].phase>=1 && l.phase>=1) {
                 drift=std::max(drift,length(l.foot-before[i].foot)); ++planted;
-                float fold=std::abs(CrawlPhysics::angle(l.joints[2]-l.joints[1],l.joints[3]-l.joints[2]))*180/PI;
-                maxGroundedFold=std::max(maxGroundedFold,fold);groundedFoldSum+=fold;++groundedFoldSamples;
+                float fold=std::abs(CrawlPhysics::angle(l.joints[2]-l.joints[1],l.joints[4]-l.joints[3]))*180/PI;
+                if(fold>maxGroundedFold) {maxGroundedFold=fold;s.render(L"maximum-fold.png");}
+                groundedFoldSum+=fold;++groundedFoldSamples;
             }
             maxReach=std::max(maxReach,length(l.foot-(s.pos+s.local((23-i%4*15)*s.scale,(i<4?-8.f:8.f)*s.scale))));
             if(!std::isfinite(l.foot.x)||!std::isfinite(l.foot.y)||starts>1) return 3;
-            for(int j=0;j<4;++j) {
+            for(int j=0;j<LEG_SEGMENTS;++j) {
                 float bone=length(l.joints[j+1]-l.joints[j]);
                 if(!std::isfinite(bone)) return 3;
-                maxBoneError=std::max(maxBoneError,std::abs(bone-l.bones[j]));
             }
+            float span=0;for(int j=1;j<LEG_SEGMENTS;++j) span+=l.bones[j];
+            float extension=length(l.joints[FOOT]-l.joints[1])/span;
+            minExtension=std::min(minExtension,extension);maxExtension=std::max(maxExtension,extension);
         }
         maxSwing=std::max(maxSwing,swinging);
         if(frame==220 || frame==234 || frame==248) {
@@ -800,20 +1172,52 @@ int motionTest(Spider& s) {
             s.render(name);
         }
     }
+    int turnFailures=0;float turnContactDrift=0,maxTurnError=0;
+    for(float turnAngle:{PI*.5f,-PI*.5f,PI}) {
+        s.pos={900,700};s.heading=s.aimHeading={1,0};s.resetFeet();
+        s.rest=0;s.escapeTurning=false;s.angularSpeed=0;s.velocity={};
+        s.target=s.pos+V{std::cos(turnAngle),std::sin(turnAngle)}*500;
+        int turnSteps=0;
+        for(int frame=0;frame<960;++frame) {
+            auto before=s.legs;s.advance(1.f/120);
+            for(int i=0;i<8;++i) {
+                if(before[i].phase>=1 && s.legs[i].phase<1) ++turnSteps;
+                if(before[i].phase>=1 && s.legs[i].phase>=1)
+                    turnContactDrift=std::max(turnContactDrift,length(before[i].foot-s.legs[i].foot));
+            }
+        }
+        float error=std::abs(CrawlPhysics::angle(s.heading,unit(s.target-s.pos)));
+        maxTurnError=std::max(maxTurnError,error);
+        if(error>.35f || turnSteps<8) ++turnFailures;
+    }
     std::ofstream report("motion-test.txt");
+    float rmsAcceleration=std::sqrt(accelerationSquared/std::max(1,accelerationSamples));
     report<<"30 seconds at 120 Hz, normal/fast/slow speeds, sharp turns\n"
+          <<"Anatomy failures across three sizes and two stances: "<<anatomyFailures<<"\n"
           <<"Steps: "<<steps<<"\nMax simultaneous lifted legs: "<<maxSwing
+          <<"\nSteps shorter than 8px: "<<microSteps
+          <<"\nMean step distance: "<<stepDistanceSum/std::max(1,steps)
+          <<"\nSteady-walk RMS acceleration: "<<rmsAcceleration
+          <<"\nMaximum exposed leg intersections: "<<maxCrossings
+          <<"\nMinimum signed side clearance (scale normalized): "<<minSide
+          <<"\nMinimum leg-to-head distance (scale normalized): "<<minHead
+          <<"\nMaximum distal joint deflection (degrees): "<<maxDistalFold
           <<"\nPlanted foot checks: "<<planted<<"\nPlanted foot drift: "<<drift
           <<"\nMaximum hip-foot distance: "<<maxReach
-          <<"\nMaximum four-segment bone error: "<<maxBoneError
+          <<"\nMinimum projected leg extension: "<<minExtension
+          <<"\nMaximum projected leg extension: "<<maxExtension
           <<"\nMaximum standing main-joint deflection (degrees): "<<standingFold
           <<"\nMaximum grounded main-joint deflection (degrees): "<<maxGroundedFold
           <<"\nMean grounded main-joint deflection (degrees): "<<groundedFoldSum/std::max(1,groundedFoldSamples)
           <<"\nBody drift with all contacts fixed: "<<fixedBodyDrift
           <<"\nBody displacement from moving one foot 30px: "<<contactPull
-          <<"\nBody travel driven by foot contacts: "<<bodyTravel<<"\n";
-    bool ok=steps>60 && maxSwing<=3 && planted>1000 && drift==0 && maxReach<180 && maxBoneError<2
-        && fixedBodyDrift<.1f && contactPull>.5f && bodyTravel>200 && standingFold<50 && maxGroundedFold<100;
+          <<"\nMaximum torso trajectory error: "<<maxTorsoError
+          <<"\nStepping turn failures (left/right/reverse): "<<turnFailures
+          <<"\nPlanted contact drift during turns: "<<turnContactDrift
+          <<"\nMaximum completed turn error (radians): "<<maxTurnError
+          <<"\nSmooth commanded body travel: "<<bodyTravel<<"\n";
+    bool ok=rmsAcceleration<2500 && microSteps<steps*.03f && anatomyFailures==0 && maxCrossings==0 && minSide>=0 && minHead>8.15f && maxDistalFold<50 && steps>60 && maxSwing<=4 && planted>1000 && drift==0 && maxReach<180 && minExtension>.25f && maxExtension<1.15f && maxExtension-minExtension>.25f
+        && turnFailures==0 && turnContactDrift==0 && fixedBodyDrift<.1f && contactPull<.01f && maxTorsoError<.01f && bodyTravel>200 && standingFold<90 && maxGroundedFold<145;
     report<<(ok?"PASS":"FAIL")<<"\n";
     return ok?0:4;
 }
@@ -821,20 +1225,25 @@ int interactionTest(Spider& s) {
     s.living=false;
     s.rng.seed(123);
     int cases=0,failures=0; float maxPinError=0,maxBoneError=0,minBodyMotion=100000,minFlail=100000,minBodyResponse=100000;
+    float minSide=10000,minHead=10000;
     for(float scale:{.7f,1.f,1.3f}) for(int leg=0;leg<8;++leg) {
         s.scale=scale; s.pos={900,700}; s.heading={1,0}; s.resetFeet();
         s.elapsed=0; s.rest=0; s.follow=false;
-        if(s.footAt(s.legs[leg].joints[4])!=leg || s.footAt(s.pos+V{220,220})!=-1) ++failures;
-        V start=s.pos,initialFree=s.legs[(leg+1)%8].joints[4]-s.pos;
-        V anchor=s.legs[leg].joints[4]; s.beginGrab(leg,anchor);
+        // Exercise pickup from the walking projection rather than only the
+        // nominal reset pose: switching to free physics must remain stable.
+        s.solveLegs(1.f/120);
+        if(s.footAt(s.legs[leg].joints[FOOT])!=leg || s.footAt(s.pos+V{220,220})!=-1) ++failures;
+        V start=s.pos,initialFree=s.legs[(leg+1)%8].joints[FOOT]-s.pos;
+        V anchor=s.legs[leg].joints[FOOT]; s.beginGrab(leg,anchor);
         float flail=0;
         for(int frame=0;frame<180;++frame) {
             float t=frame/120.f;
             s.dragTarget=anchor+V{t*220,std::sin(t*5)*45-t*85};
             s.advance(1.f/120);
+            auto clearance=s.legClearance();minSide=std::min(minSide,clearance[0]);minHead=std::min(minHead,clearance[1]);
             if(scale==1.f && leg==0 && frame==110) s.render(L"drag-preview.png");
-            maxPinError=std::max(maxPinError,length(s.legs[leg].joints[4]-s.dragTarget));
-            flail=std::max(flail,length((s.legs[(leg+1)%8].joints[4]-s.pos)-initialFree));
+            maxPinError=std::max(maxPinError,length(s.legs[leg].joints[FOOT]-s.dragTarget));
+            flail=std::max(flail,length((s.legs[(leg+1)%8].joints[FOOT]-s.pos)-initialFree));
             for(const auto& b:s.physics.bones) {
                 float actual=length(s.physics.particles[b.a].p-s.physics.particles[b.b].p);
                 if(!std::isfinite(actual)) ++failures;
@@ -849,18 +1258,20 @@ int interactionTest(Spider& s) {
         s.dragVelocity={700,-150}; s.lastDragTime=GetTickCount64(); s.endGrab();
         for(int n=0;n<180;++n) s.advance(1.f/120);
         if(s.grabbed!=-1 || s.airborne>0 || !std::isfinite(s.pos.x)||!std::isfinite(s.pos.y)) ++failures;
-        for(const auto& l:s.legs) if(s.physics.particles[l.ids[4]].mass!=0) ++failures;
+        for(const auto& l:s.legs) if(s.physics.particles[l.ids[FOOT]].mass!=0) ++failures;
         // Holding the mouse still before release must not replay a stale throw.
-        s.beginGrab(leg,s.legs[leg].joints[4]); s.dragVelocity={1500,0};
+        s.beginGrab(leg,s.legs[leg].joints[FOOT]); s.dragVelocity={1500,0};
         s.lastDragTime=GetTickCount64()-200; s.endGrab();
         if(length(s.dragVelocity)>.01f) ++failures;
         for(int n=0;n<90;++n) s.advance(1.f/120);
         ++cases;
     }
-    bool ok=failures==0 && maxPinError<.01f && maxBoneError<5 && minBodyResponse>.2f && minFlail>10;
+    bool ok=failures==0 && minSide>=0 && minHead>8.15f && maxPinError<.01f && maxBoneError<5 && minBodyResponse>.2f && minFlail>10;
     std::ofstream report("interaction-test.txt");
     report<<"All 8 legs at 3 sizes, drag/flail/throw/land/stationary release\nCases: "<<cases
           <<"\nFailures: "<<failures<<"\nMaximum held toe error: "<<maxPinError
+          <<"\nMinimum signed side clearance (scale normalized): "<<minSide
+          <<"\nMinimum leg-to-head distance (scale normalized): "<<minHead
           <<"\nMaximum bone length error while dragging: "<<maxBoneError
           <<"\nMinimum body displacement: "<<minBodyMotion
           <<"\nMinimum body-to-pointer displacement ratio: "<<minBodyResponse
@@ -877,14 +1288,10 @@ LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l) {
     static UINT taskbar=RegisterWindowMessageW(L"TaskbarCreated");
     if(m==taskbar && app) {RuntimeLog::write("event=taskbar_recreated");app->addTray(); return 0; }
     switch(m) {
-        case WM_TIMER: if(w==2) DestroyWindow(h); else if(w==3) app->inputTestTick(); else {
-            app->tick();static ULONGLONG lastHeartbeat=GetTickCount64();
-            if(GetTickCount64()-lastHeartbeat>=60000) {
-                lastHeartbeat=GetTickCount64();
+        case WM_TIMER: if(w==2) DestroyWindow(h); else if(w==3) app->inputTestTick(); else if(w==1) {
                 RuntimeLog::write("event=heartbeat state=%ls paused=%d hunger=%.1f energy=%.2f x=%.0f y=%.0f gdi=%lu",
                     CreatureMind::label(app->mind.state,Language::English),app->paused,app->mind.hunger,app->mind.energy,
                     app->pos.x,app->pos.y,GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS));
-            }
         } return 0;
         case WM_HOTKEY: RuntimeLog::write("event=hotkey id=%llu",static_cast<unsigned long long>(w));
                         if(w==1) {app->paused=!app->paused;if(app->paused)app->stopEating();}
@@ -956,7 +1363,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
                 if(spider.living&&!spider.inputTest)spider.reportStartupError(spider.startup.initialize());
                 if(!RegisterHotKey(spider.hwnd,1,MOD_CONTROL|MOD_ALT|MOD_NOREPEAT,'S'))RuntimeLog::write("event=hotkey_registration_failed key=S error=%lu",GetLastError());
                 if(!RegisterHotKey(spider.hwnd,2,MOD_CONTROL|MOD_ALT|MOD_NOREPEAT,'Q'))RuntimeLog::write("event=hotkey_registration_failed key=Q error=%lu",GetLastError());
-                SetTimer(spider.hwnd,1,16,nullptr);
+                SetTimer(spider.hwnd,1,60000,nullptr); // Runtime heartbeat only.
                 if(wcsstr(command,L"--smoke-test")) SetTimer(spider.hwnd,2,3000,nullptr);
                 if(wcsstr(command,L"--input-test")) {
                     spider.living=true; spider.mind.init(spider.senses());
@@ -974,9 +1381,28 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
                     SetTimer(spider.hwnd,3,150,nullptr);
                 }
                 RuntimeLog::write("event=window_ready");
-                MSG msg;BOOL messageResult;
-                while((messageResult=GetMessageW(&msg,nullptr,0,0))>0) { TranslateMessage(&msg); DispatchMessageW(&msg); }
-                if(messageResult==-1) {RuntimeLog::write("event=message_loop_failed error=%lu",GetLastError());result=4;}
+                MSG msg{};bool running=true;unsigned long long renderedFrames=0;
+                auto renderStart=std::chrono::steady_clock::now();
+                spider.last=renderStart;
+                while(running) {
+                    // Keep input responsive even under a busy message queue,
+                    // then render immediately without a timer, sleep, or cap.
+                    for(int count=0;count<64 && PeekMessageW(&msg,nullptr,0,0,PM_REMOVE);++count) {
+                        if(msg.message==WM_QUIT) {running=false;break;}
+                        TranslateMessage(&msg);DispatchMessageW(&msg);
+                    }
+                    if(!running) break;
+                    spider.tick();++renderedFrames;
+                    if(spider.paused && spider.grabbed<0 && spider.airborne<=0)
+                        MsgWaitForMultipleObjectsEx(0,nullptr,INFINITE,QS_ALLINPUT,MWMO_INPUTAVAILABLE);
+                }
+                if(wcsstr(command,L"--smoke-test") && !launchProbe) {
+                    double seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-renderStart).count();
+                    std::ofstream report("render-smoke.txt");
+                    report<<"Frames: "<<renderedFrames<<"\nWall seconds: "<<seconds
+                          <<"\nAverage render FPS: "<<renderedFrames/std::max(.001,seconds)
+                          <<"\nSimulation seconds: "<<spider.elapsed<<"\n";
+                }
                 if(spider.inputTest && spider.inputFailures) result=7;
             }
         }

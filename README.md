@@ -10,9 +10,12 @@ A tiny articulated spider that wanders your Windows desktop.
 ## English
 
 Silkstride is a native **C++17 / Win32 / GDI+** desktop pet for Windows 10/11 x64.
-Eight articulated legs, a shared Verlet physics body, natural banded coloring,
+Eight articulated legs, Verlet physics when picked up, natural banded coloring,
 optional rainbow cycling, and a small behavior system bring it to life. No browser engine, third-party runtime, or admin
 rights required. Startup with Windows is enabled on the first normal launch.
+Rendering runs without an application frame cap; motion and physics use fixed
+120 Hz updates so faster rendering does not speed up the creature. Pausing waits
+for input instead of continuously rendering an unchanged frame.
 
 ### Download and run
 
@@ -36,12 +39,27 @@ in the tray menu. Use disposable files when trying this feature.
 
 ### What it does
 
-- **Walks with its feet.** Four segments per leg, distance and angle constraints,
-  planted contacts, alternating steps, and an inertial body. This is a stylized
-  four-segment model, not a one-to-one anatomical model. The short distal foot
-  continues the lower leg with a subtle bend instead of folding back into a hook.
-  A short root and two long main sections form a gently bent, fanned stance;
-  the knees follow the body-to-foot direction instead of a permanent zigzag.
+- **Smooth body, independent steps.** Six simulated sections per leg: a combined coxa/trochanter
+  root, femur, short patella, tibia, metatarsus, and tarsus. The torso follows a
+  smooth path without step-induced bobbing or yaw. Planted feet stay still as
+  the legs extend or retract; approaching the reach limit triggers another step.
+  Turns reposition feet in sequence while planted contacts stay fixed; the torso
+  turns with the steps instead of rotating the entire frozen pose.
+  Walking uses variable planar projections to suggest out-of-plane flexion;
+  grabbing and throwing retain fixed nominal bone lengths and free-body physics.
+  Leg pairs I–IV use approximately **1.00 : 0.83 : 0.48 : 0.83** lengths, inspired
+  by adult female *Nephila pilipes*. The front and rear pairs extend lengthwise;
+  the short third pair takes smaller steps. This remains a planar approximation.
+  Proportions follow [Robinson & Robinson (1973), Table 1](https://doi.org/10.5479/si.00810282.149)
+  and [Harvey et al. (2007)](https://doi.org/10.1071/IS05016); resting angles are artistic choices.
+  Angular lanes keep exposed legs apart during walking and turning. The abdomen
+  has an oval, rounded triangular outline tapering toward the tail.
+  Lateral roots open into a forward V, a short side pair, and rearward hind legs.
+  Side constraints and segment-to-head clearance also apply while being dragged.
+  Foot placement preserves extension, and distal joint limits prevent hooked feet.
+  Continuous contacts replace grid snapping and per-step random jitter. Small
+  corrective steps are skipped, and foot lift is visual height rather than a
+  sideways force on the body; smooth swing curves ease takeoff and landing.
 - **Natural regional colors by default.** A dark brown head/chest, a lighter
   patterned abdomen, and brown legs with dark bands. Enable rainbow cycling in
   the tray for synchronized changing colors; turning it off restores natural
@@ -50,10 +68,26 @@ in the tray menu. Use disposable files when trying this feature.
   legs flail while the body hangs from your pointer. Release gently or fling it;
   it lands and recovers its footing. Other desktop clicks pass through.
 - **Has a daily rhythm.** Explores, observes, approaches cautiously, retreats from
-  fast incoming mouse movement, rests in corners, and grooms its legs.
+  fast incoming mouse movement, rests in corners, and grooms its legs. When startled, it
+  rapidly escapes away from the approaching cursor. Ordinary wandering turns
+  toward its destination before moving forward.
+  Free exploration uses short walking bouts with varied pace, smooth acceleration
+  and deceleration, and brief inspection pauses; escape and feeding keep their own pace.
+  Each new walking bout randomly selects a slow, medium, or fast pace
+  (about 75, 195, or 450 pixels/second at the default speed). Hunger does not
+  affect movement speed or tier selection.
+  While stopped, any of the eight legs can probe, stretch, or tap at random
+  intervals and amplitudes, without repeating the same leg consecutively.
+  Attention and approach navigation use current cursor observations without an artificial delay.
+  A startle immediately begins a faster stepping turn toward the escape route,
+  then accelerates along the head direction without sideways sliding. It replans when the cursor continues approaching,
+  and chooses a distant corner when the screen edge blocks a direct escape.
+  Its escape speed is twice the original speed.
 - **Remembers interactions.** Personality, energy, trust, fear, hunger, and visited
   regions persist across restarts. It gradually calms down after being handled.
-- **Gets hungry.** Ordinary movement slows at high hunger. A hungry spider can
+- **Gets hungry.** A satiated body is glossy and nearly black, ordinary hunger
+  restores its natural colors, and severe hunger fades it toward gray without
+  slowing movement. A hungry spider can
   approach a visible Recycle Bin filename and chew before consuming that file.
 - **Speaks English and Chinese.** The initial language follows Windows UI language
   (Chinese for Chinese locales; English otherwise). Change it in
@@ -95,10 +129,12 @@ it through its own startup-app controls.
 
 ### Hunger and feeding
 
-Hunger ranges from 0 to 100 and starts at 20 for a new pet. It rises by **3 points
-per minute** during ordinary activity, or **1.5 points per minute** while resting
-or grooming. It does not rise while paused or closed. Above 65, ordinary movement
-slows; at 80 it starts seeking food, continuing until hunger is 5 or lower.
+Hunger ranges from 0 to 100 and starts at 20 for a new pet. A full meal leaves
+about **1–1.5 active hours** of satiety (below 25), with a dark, glossy body.
+Ordinary hunger (25–80) lasts another **3.5 active hours**, with natural body colors.
+At 80 it seeks food and begins fading toward gray; 80–100 takes another hour.
+Activity and rest use the same timing. Hunger does not rise while paused or
+closed and never reduces movement speed. Eating continues until hunger is 5 or lower.
 
 It only targets a visible, exposed, genuine Windows Recycle Bin folder view on
 the pet's monitor. It locates an actual filename, walks close, and chews for about
@@ -176,7 +212,7 @@ fails or does not produce a report. For the manual arguments below, run
 
 | Argument | Coverage |
 | --- | --- |
-| `--motion-test` | Walking, planted feet, standing/grounded joint deflection, turn stability, contact-driven body movement |
+| `--motion-test` | Walking, planted feet, projected leg extension, joint deflection, turn stability, smooth torso trajectory |
 | `--interaction-test` | All eight legs at three sizes: drag, flail, throw, land; body response relative to pointer travel |
 | `--behavior-test` | Fear, curiosity, rest, memory, two-minute physical simulation |
 | `--feeding-test` | Mock feeding, interruption, filename approach, persistence; no real deletions |
@@ -216,9 +252,11 @@ Released under the [MIT License](LICENSE).
 ## 简体中文
 
 丝行（Silkstride）是一个原生 **C++17 / Win32 / GDI+** 桌面宠物，支持 Windows
-10/11 x64。八条四段关节腿与身体共享 Verlet 物理系统，默认自然分区配色和腿部环纹，
+10/11 x64。八条六段关节腿，抓起时使用 Verlet 物理系统，默认自然分区配色和腿部环纹，
 也可切换循环彩虹配色，具有自主行为。
 无需浏览器引擎、额外运行库或管理员权限。首次正常运行默认加入开机启动。
+渲染不设程序帧数上限；动作和物理按固定 120 Hz 更新，帧率提高不会让蜘蛛动作加速。
+暂停时等待输入，不持续重复渲染静止画面。
 
 ### 下载与运行
 
@@ -237,17 +275,35 @@ Released under the [MIT License](LICENSE).
 
 ### 功能
 
-- **用脚牵动身体行走**：四段关节、距离和角度约束、固定落脚点、交替换脚，身体有惯性。
-  四段是简化的视觉模型，并非真实解剖的一一对应；末端足节缩短、顺势轻弯，不再反折成钩子。
-  腿根较短、两段主体拉长，以轻微弯折向外展开；主关节沿身体到脚尖的方向排列，去掉固定的
-  “之”字折叠站姿。
+- **身体平稳、腿独立迈步**：每条腿模拟六段：合并基节与转节的腿根、腿节、短膝节、胫节、
+  后跗节和跗节。身体沿平滑路线移动，不随换脚上下起伏或左右晃动。落地脚点保持固定，
+  转身时依次抬脚重新落位，身体配合换脚转向，不再把整套静止姿势一起旋转。
+  腿随身体前进伸展或收拢，接近活动范围边缘时再迈步。行走时通过平面投影长度变化表现
+  腿向屏幕外屈伸；抓起和甩动时仍采用固定标称骨长与自由身体物理。第一至第四对腿的
+  长度约为 **1.00∶0.83∶0.48∶0.83**，参考成年雌性大木林蛛（*Nephila pilipes*）；
+  前后两对沿身体纵向伸展，短第三对使用较小步幅。这仍是平面简化模型。
+  比例依据 [Robinson 夫妇（1973）表 1](https://doi.org/10.5479/si.00810282.149)
+  和 [Harvey 等（2007）](https://doi.org/10.1071/IS05016)，静止朝向属于造型设计。
+  行走与转向时，通过各腿的角度活动范围避免外露腿段交叉；腹部为椭圆感的圆角三角轮廓，尾端收尖。
+  腿根从头胸部两侧向外伸展，前腿呈 V 形，短腿居侧，后腿向后伸；拖拽时也约束左右侧归属和整段腿与头部的间距。
+  落脚点保留伸展距离，并限制末端关节折角，避免后腿折回成钩。
+  使用连续落脚点，取消网格吸附和逐步随机抖动，跳过过小的修正步；抬脚只表现为视觉高度，
+  不再横向拉扯身体，起落采用平滑曲线。
 - **默认自然分区配色**：头胸部深褐色，腹部为较浅的暖褐色并带细纹，腿部有深色环带。
   托盘可开启彩虹循环，使全身同步变色；关闭后恢复自然色。每次启动默认使用自然配色。
 - **抓脚、挣扎和甩动**：左键按住任意脚尖，身体悬挂，其他七条腿自由挣扎。轻放或甩出后，
   它会落地并恢复支撑。其他桌面点击正常穿透。
 - **自主生活节奏**：探索、停下观察、好奇靠近、躲避快速逼近的鼠标、去角落休息、整理腿脚。
+  自由探索采用长短、快慢不同的短段行走，平滑起步和减速，中间短暂停下观察；逃跑和进食节奏独立。
+  每次起步随机选择慢、中、快三档，默认速度下约为每秒 75、195、450 像素。
+  饥饿不影响移动速度或档位选择。
+  停下时八条腿都可能随机试探、伸展或轻点，间隔与幅度各异，不连续选中同一只脚。
+  随机游走先转向目标再向前走；受惊时立即用更快的换脚动作转向远离鼠标的路线，
+  对准后沿头部方向加速，逃跑中重新规划路线也先调整朝向，避免身体侧向滑动。
+  注视和靠近使用当前鼠标位置，不设置人工延迟。鼠标继续逼近时重新规划逃跑路线，
+  屏幕边缘挡住直接逃跑路线时改选远处角落。逃跑速度保持为最初速度的两倍。
 - **性格与互动记忆**：性格、精力、信任、警觉、饥饿和探索记录跨重启保留，被抓后会逐渐平静。
-- **饥饿与进食**：饥饿时普通行动变慢，可以爬到回收站里实际可见的文件名附近咀嚼并吃掉文件。
+- **饥饿与进食**：饱足时身体偏黑、带光泽，普通饥饿恢复自然颜色，特别饥饿才逐渐褪色偏灰；腿部颜色不变，也不降低行动速度。仍可以爬到回收站里实际可见的文件名附近咀嚼并吃掉文件。
 - **中英文界面**：首次按 Windows 界面语言选择（中文系统使用简体中文，其余使用 English），
   可在 **Language / 语言 → 简体中文 / English** 切换，立即保存偏好。
 
@@ -282,9 +338,11 @@ Released under the [MIT License](LICENSE).
 
 ### 饥饿与回收站进食
 
-饥饿值为 0～100，新宠物初始为 20。普通活动每分钟增加 **3 点**，休息或整理腿脚时每分钟
-增加 **1.5 点**。暂停或关闭时不增长。超过 65 后普通移动变慢，达到 80 开始寻找食物，
-持续进食直到饥饿不高于 5。
+饥饿值为 0～100，新宠物初始为 20。吃饱后保持约 **1～1.5 小时**的饱足状态（低于 25），
+身体偏黑、带光泽；普通饥饿阶段（25～80）再持续约 **3.5 小时**，恢复自然颜色。
+达到 80 后开始寻找食物，并逐渐褪色偏灰；80 增至 100 还需约 1 小时。
+只计算宠物运行且未暂停的时间，活动与休息采用相同节奏；关闭时不增长。
+饥饿不降低移动速度，进食仍持续到饥饿不高于 5。
 
 它只会寻找所在屏幕上可见、未被遮住的真实 Windows 回收站视图。先定位文件名，爬近并停稳，
 咀嚼约 4 秒。每成功永久删除一个文件，饥饿减少 15 点。删除前再次核对文件身份、可见性、
@@ -351,7 +409,7 @@ pwsh -NoProfile -File ./test.ps1 -Suite startup
 
 | 参数 | 验证内容 |
 | --- | --- |
-| `--motion-test` | 步态、脚点固定、站立/落地关节转折、转向稳定、脚点驱动身体 |
+| `--motion-test` | 步态、脚点固定、腿投影伸缩、关节转折、转向稳定、身体轨迹平滑 |
 | `--interaction-test` | 八条腿 × 三种大小：拖拽、挣扎、甩动和落地；身体相对鼠标行程的响应 |
 | `--behavior-test` | 警觉、好奇、休息、记忆和两分钟真实物理模拟 |
 | `--feeding-test` | 模拟进食、中断、靠近文件名和存档；不删除真实文件 |

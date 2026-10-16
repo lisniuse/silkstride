@@ -2,7 +2,7 @@
 #include "i18n.h"
 
 // Perception, needs and memory are independent of rendering and input hooks.
-// Navigation proposes contacts; the Verlet body still moves only through its feet.
+// Navigation supplies intent and pace; rendering and contact placement stay separate.
 class CreatureMind {
 public:
     enum class State { Wake, Prepare, Explore, Observe, Approach, Flee, Shelter, Rest, Groom, Recover, Held, SeekFood, Eat };
@@ -15,12 +15,15 @@ public:
         V foodPoint{};
         RECT foodArea{};
         V cursorVelocity{};
+        V facing{1,0};
+        bool turning=false;
     };
     State state=State::Wake,pending=State::Explore;
     std::mt19937 random;
     unsigned seed=0;
     float energy=.8f,fear=0,trust=.6f,aversion=0;
     float hunger=20;
+    double hungerRemainder=0;
     bool autoEat=true,mealWanted=false;
     float boldness=.5f,curiosity=.7f,activity=.6f;
     float age=0,time=0,deadline=1,attentionTime=0,calmTime=0;
@@ -28,6 +31,11 @@ public:
     V goal{},attention{},threat{},favorite{};
     int favoriteCorner=0,visits[9]{},grabs=0,transitionCount=0;
     bool moving=false,initialized=false;
+    float boutAge=0,boutDuration=1,pauseDuration=.5f,boutGain=1;
+    int boutTier=0;
+    bool inspecting=false,quickBout=false;
+    int idleLeg=-1,lastIdleLeg=-1,idleStyle=0;
+    float idleAge=0,idleDuration=.5f,idleWait=.15f,idleAmplitude=4;
 
     CreatureMind() { reseed(std::random_device{}()); }
     bool readMemory(std::istream& file) {
@@ -40,7 +48,7 @@ public:
         reseed(savedSeed); trust=std::clamp(savedTrust,.05f,.95f); energy=std::clamp(savedEnergy,.1f,1.f);
         fear=std::clamp(savedFear,0.f,1.f); aversion=std::clamp(savedAversion,0.f,1.f);
         grabs=std::clamp(count,0,100000);
-        hunger=std::clamp(savedHunger,0.f,100.f);autoEat=enabled!=0;mealWanted=hunger>=80;
+        hunger=std::clamp(savedHunger,0.f,100.f);hungerRemainder=0;autoEat=enabled!=0;mealWanted=hunger>=80;
         if(fear>.3f) noApproach=12+aversion*25;
         for(int& visit:visits) { int value=0; if(file>>value) visit=std::clamp(value,0,10000); }
         return true;
@@ -49,6 +57,25 @@ public:
         file<<"2 "<<seed<<" "<<trust<<" "<<energy<<" "<<fear<<" "<<aversion<<" "<<grabs<<" "<<hunger<<" "<<autoEat<<"\n";
         for(int count:visits) file<<count<<" ";
         file<<"\n";
+    }
+    float fullness() const {
+        float t=std::clamp((hunger-20.f)/5.f,0.f,1.f);
+        return 1-t*t*(3-2*t);
+    }
+    void advanceHunger(float seconds) {
+        // Active runtime only: 0-25 takes 90 minutes, 25-80 takes 210
+        // minutes, and severe hunger (80-100) develops over another hour.
+        // Keep sub-float increments so the 120 Hz loop does not distort hours.
+        double value=std::clamp(double(hunger)+hungerRemainder,0.,100.);
+        double remaining=std::max(0.,double(seconds));
+        while(remaining>0 && value<100) {
+            double boundary=value<25?25:value<80?80:100;
+            double rate=value<25?25./5400:value<80?55./12600:20./3600;
+            double duration=(boundary-value)/rate;
+            if(remaining>=duration) {value=boundary;remaining-=duration;}
+            else {value+=remaining*rate;remaining=0;}
+        }
+        hunger=float(value);hungerRemainder=value-double(hunger);
     }
     float range(float a,float b) { return std::uniform_real_distribution<float>(a,b)(random); }
     void reseed(unsigned value) {
@@ -68,9 +95,38 @@ public:
     V corner(int index,const Senses& s) const {
         return clampGoal({float(index%2?s.bounds.right:s.bounds.left),float(index/2?s.bounds.bottom:s.bounds.top)},s);
     }
+    void chooseBout() {
+        // Select one of three distinct speeds per action, independently of
+        // hunger. Six times the default 75 px/s preserves the preview dash.
+        boutTier=int(random()%3);
+        quickBout=boutTier>0;
+        boutDuration=quickBout?range(.9f,1.5f):range(.65f,1.6f);
+        pauseDuration=range(.35f,.85f);
+        boutGain=boutTier==0?1.f:boutTier==1?2.6f:6.f;
+    }
+    void updateIdle(float dt) {
+        bool eligible=!moving && (state==State::Observe || state==State::Prepare || state==State::Wake
+            || state==State::Rest || (state==State::Explore && inspecting));
+        if(!eligible) {idleLeg=-1;idleAge=0;idleWait=.15f;return;}
+        if(idleLeg>=0) {
+            idleAge+=dt;
+            if(idleAge>=idleDuration) {
+                idleLeg=-1;idleAge=0;
+                idleWait=state==State::Rest?range(1.8f,4.f):range(.25f,1.2f);
+            }
+        } else if((idleWait-=dt)<=0) {
+            idleLeg=lastIdleLeg<0?int(random()%8):(lastIdleLeg+1+int(random()%7))%8;
+            lastIdleLeg=idleLeg;idleStyle=int(random()%3);
+            idleAge=0;idleDuration=range(.35f,.85f);idleAmplitude=range(2.f,6.f);
+        }
+    }
     void enter(State next,float seconds) {
         if(state!=next) ++transitionCount;
         state=next; age=0; deadline=seconds; attentionTime=0;
+        if(next==State::Explore) {
+            boutAge=0;inspecting=false;
+            chooseBout();
+        }
     }
     void init(const Senses& s) {
         favorite=corner(favoriteCorner,s); goal=s.body; attention=s.body+V{80,0};
@@ -110,7 +166,7 @@ public:
         if(length(goal-s.body)<100*s.scale) {
             float best=-1;
             for(int i=0;i<4;++i) {
-                V c=corner(i,s); float score=length(c-threat);
+                V c=corner(i,s);float score=length(c-threat);
                 if(score>best) {best=score;goal=c;}
             }
         }
@@ -118,8 +174,8 @@ public:
     void flee(const Senses& s) {
         noApproach=std::max(noApproach,8.f+aversion*25);
         escapeGoal(s); enter(State::Flee,range(2.2f,4.2f));
-        // Startle uses an immediate burst instead of the slow exploration ramp.
-        speedFactor=std::max(speedFactor,1.4f);
+        // Preserve the faster initial burst while restoring threat-based routing.
+        speedFactor=std::max(speedFactor,2.8f);
         startleCooldown=2.f;
     }
     void grabbed(V cursor) {
@@ -134,7 +190,7 @@ public:
         energy=std::max(.1f,energy-.04f); enter(State::Recover,1.2f);
     }
     void ateFile() {
-        hunger=std::max(0.f,hunger-15);energy=std::min(1.f,energy+.04f);
+        hunger=std::max(0.f,hunger-15);hungerRemainder=0;energy=std::min(1.f,energy+.04f);
         if(hunger<=5) {mealWanted=false;enter(State::Observe,1.5f);}
     }
     void update(float dt,const Senses& s) {
@@ -146,7 +202,7 @@ public:
                      && s.cursor.y>=s.bounds.top && s.cursor.y<=s.bounds.bottom;
         bool resting=state==State::Rest || state==State::Groom;
         energy=std::clamp(energy+dt*(resting?.025f:state==State::Held?-.009f:moving?-.0075f:-.001f),.05f,1.f);
-        hunger=std::min(100.f,hunger+dt*(resting?.025f:.05f));
+        advanceHunger(dt);
         if(hunger>=80) mealWanted=true;
         if(hunger<=5) mealWanted=false;
         V towardBody=unit(s.body-s.cursor);
@@ -257,28 +313,53 @@ public:
         attention=(visible && distance<500 && state!=State::Flee && state!=State::Shelter)?s.cursor:goal;
         if(state==State::Rest || state==State::Groom) attention=s.body+V{std::cos(time*.35f),std::sin(time*.35f)}*(100*s.scale);
         moving=state==State::Explore || state==State::Approach || state==State::Flee || state==State::Shelter || state==State::SeekFood;
-        float desiredSpeed=state==State::Flee?2.6f:state==State::SeekFood?1.2f:state==State::Approach?.4f:state==State::Shelter?.85f:.65f+activity*.5f;
+        float desiredSpeed=state==State::Flee?5.2f:state==State::SeekFood?1.2f:state==State::Approach?.4f:state==State::Shelter?.85f:.65f+activity*.5f;
+        if(state==State::Explore) {
+            // Choose a pace once per walking bout, never a random value per
+            // frame. Turning does not use up the time allocated to walking.
+            if(!s.turning) boutAge+=dt;
+            if(boutAge>=(inspecting?pauseDuration:boutDuration)) {
+                boutAge=0;inspecting=!inspecting;
+                if(!inspecting) {
+                    chooseBout();
+                }
+            }
+            if(inspecting) {moving=false;desiredSpeed=0;}
+            else {
+                auto ease=[](float x) {x=std::clamp(x,0.f,1.f);return x*x*(3-2*x);};
+                float envelope=ease(boutAge/(quickBout?.10f:.22f))*ease((boutDuration-boutAge)/.28f);
+                desiredSpeed=boutGain*envelope;
+            }
+        }
         if(!moving) desiredSpeed=0;
-        else if(state!=State::Flee) desiredSpeed*=std::clamp(age/.7f,.2f,1.f)*(.65f+energy*.35f);
-        if(state!=State::Flee && state!=State::SeekFood && hunger>65) desiredSpeed*=std::max(.3f,1-(hunger-65)*.02f);
-        speedFactor+=(desiredSpeed-speedFactor)*(1-std::exp(-dt*5));
+        else if(state!=State::Flee && state!=State::Explore) desiredSpeed*=std::clamp(age/.7f,.2f,1.f)*(.65f+energy*.35f);
+        speedFactor+=(desiredSpeed-speedFactor)*(1-std::exp(-dt*(state==State::Explore?9.f:5.f)));
         float desiredStance=state==State::Rest?.84f:state==State::Groom?.9f:state==State::Flee?1.08f:state==State::Recover?.88f:1.f;
         stance+=(desiredStance-stance)*(1-std::exp(-dt*2));
+        updateIdle(dt);
         look=visible?std::atan2(attention.y-s.body.y,attention.x-s.body.x):0;
     }
     V toeMotion(int leg,V heading) const {
         float envelope=0,x=0,y=0;
         int side=leg<4?-1:1;
-        if((state==State::Observe || state==State::Prepare || state==State::Wake) && leg==(int(time/3)%2?4:0)) {
-            float phase=std::clamp(age/std::max(.1f,deadline),0.f,1.f);
-            envelope=std::sin(phase*PI); x=12*envelope; y=-side*9*envelope;
+        if(!moving && idleLeg==leg && (state==State::Observe || state==State::Prepare || state==State::Wake
+            || state==State::Rest || (state==State::Explore && inspecting))) {
+            float phase=std::clamp(idleAge/idleDuration,0.f,1.f);
+            float pulse=std::sin(phase*PI);pulse*=pulse;
+            // Probe, stretch, or make a small double tap; all begin and end
+            // at the same contact, with a randomly chosen leg and amplitude.
+            float radial=idleStyle==1?pulse:pulse*std::cos(phase*PI);
+            float tap=idleStyle==2?std::sin(phase*2*PI)*pulse:0;
+            x=(leg%4<2?1.f:-1.f)*idleAmplitude*radial*.6f;
+            y=side*idleAmplitude*(radial+tap*.35f);
+            return {heading.x*x-heading.y*y,heading.y*x+heading.x*y};
         } else if(state==State::Groom && leg==(int(time/4)%2?4:0)) {
             float edge=std::min(1.f,std::min(age,deadline-age)*3);
             envelope=std::max(0.f,edge); x=std::sin(age*7)*7*envelope; y=-side*(15+9*std::sin(age*5))*envelope;
         } else if(state==State::Eat && (leg==0 || leg==4)) {
             // Small distal handling motions suit the longer, extended stance;
             // a large forefoot sweep would rock the whole body off its meal.
-            envelope=std::min(1.f,age*2)*.4f;x=(8+std::sin(age*12)*4)*envelope;y=-side*(12+std::sin(age*12)*5)*envelope;
+            envelope=std::min(1.f,age*2)*.1f;x=(8+std::sin(age*12)*4)*envelope;y=-side*(12+std::sin(age*12)*5)*envelope;
         }
         return {heading.x*x-heading.y*y,heading.y*x+heading.x*y-envelope*5};
     }

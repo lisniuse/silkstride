@@ -49,9 +49,13 @@ public:
             p.p=p.p+(p.p-p.old)*std::exp(-dt*9)+acceleration*(dt*dt);
             p.old=current;
         }
-        for(int iteration=0;iteration<40;++iteration) {
+        for(int iteration=0;iteration<120;++iteration) {
             for(const auto& b:bends) solveBend(b);
             for(const auto& b:bones) solveBone(b);
         }
+        // Finish with distance projections so short anatomical sections do not
+        // stretch while the angular constraints distribute a turning load.
+        for(int iteration=0;iteration<24;++iteration)
+            for(const auto& b:bones) solveBone(b);
     }
 };

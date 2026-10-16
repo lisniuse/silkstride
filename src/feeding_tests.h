@@ -12,7 +12,32 @@ int feedingTest(Spider& spider) {
     healthy.init(s);hungry.init(s);healthy.enter(State::Explore,10);hungry.enter(State::Explore,10);
     healthy.age=hungry.age=1;healthy.goal=hungry.goal={1300,700};hungry.hunger=95;
     healthy.update(.1f,s);hungry.update(.1f,s);
-    check(hungry.speedFactor<healthy.speedFactor*.65f,"Severe hunger visibly slows ordinary movement");
+    check(std::abs(hungry.speedFactor-healthy.speedFactor)<.0001f && hungry.boutTier==healthy.boutTier,
+          "Hunger does not change movement speed or random exploration tier");
+    CreatureMind digestion;digestion.hunger=0;
+    digestion.advanceHunger(3600);
+    check(digestion.hunger<25,"A full meal remains satiating for at least one active hour");
+    digestion.advanceHunger(3600);
+    check(digestion.hunger>=25 && digestion.hunger<80,"Satiety ends within two hours without becoming severely hungry");
+    digestion.hunger=25;digestion.hungerRemainder=0;digestion.advanceHunger(3*3600);
+    check(digestion.hunger<80,"Ordinary hunger lasts at least three active hours");
+    digestion.advanceHunger(3600);
+    check(digestion.hunger>=80,"Severe hunger begins within four hours after satiety ends");
+    digestion.hunger=0;digestion.hungerRemainder=0;
+    for(int frame=0;frame<3600*120;++frame) digestion.advanceHunger(1.f/120);
+    check(std::abs(digestion.hunger-25.f*3600/5400)<.001f,"120 Hz hunger accumulation preserves hour-scale timing");
+    spider.rainbow=false;spider.mind.hunger=0;Color fullColor=spider.bodyPigment(0);
+    spider.render(L"satiety-full.png");
+    spider.mind.hunger=50;
+    Color fedColor=spider.bodyPigment(0),legColor=spider.pigment(0);
+    spider.render(L"satiety-ordinary.png");
+    spider.mind.hunger=100;Color hungryColor=spider.bodyPigment(0);
+    spider.render(L"satiety-hungry.png");
+    check(fullColor.GetR()<fedColor.GetR()*.4f && fullColor.GetG()<fedColor.GetG()*.4f,
+          "A full meal produces a distinctly darker body than ordinary hunger");
+    check(hungryColor.GetR()-hungryColor.GetB()<fedColor.GetR()-fedColor.GetB()
+          && spider.pigment(0).GetValue()==legColor.GetValue(),
+          "Hunger fades the body color without changing the legs");
     s.foodVisible=true;s.foodPoint={900,700};s.foodArea={600,400,1400,1000};
     mind.update(.02f,s);
     check(mind.state==State::Eat,"Very hungry creature enters the open bin and starts eating only after arriving");
