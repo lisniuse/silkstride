@@ -1,6 +1,6 @@
 param(
-    [ValidateSet('motion', 'interaction', 'behavior', 'feeding', 'i18n', 'startup')]
-    [string[]]$Suite = @('motion', 'interaction', 'behavior', 'feeding', 'i18n', 'startup')
+    [ValidateSet('motion', 'interaction', 'behavior', 'feeding', 'i18n', 'startup', 'logging')]
+    [string[]]$Suite = @('motion', 'interaction', 'behavior', 'feeding', 'i18n', 'startup', 'logging')
 )
 
 $ErrorActionPreference = 'Stop'

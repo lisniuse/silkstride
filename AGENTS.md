@@ -39,7 +39,8 @@ Examples / 示例：
   Use `pwsh -NoProfile -File ./test.ps1` for diagnostics, with reports and images
   in `out/tests/`. Run manual diagnostic arguments from `out/tests/` as well.
   Non-destructive CI checks are motion,
-  interaction, behavior, feeding, i18n, and startup tests. Startup tests must use
+  interaction, behavior, feeding, i18n, startup, and logging tests. Logging tests
+  must not modify personal runtime logs. Startup tests must use
   isolated registry keys and never change actual sign-in startup entries.
   The input test moves the cursor;
   the canary test performs a real deletion of its own disposable file.

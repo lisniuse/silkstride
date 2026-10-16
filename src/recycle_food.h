@@ -11,6 +11,7 @@
 #include <unordered_set>
 #include <shlwapi.h>
 #include <UIAutomation.h>
+#include "runtime_log.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -365,8 +366,9 @@ class RecycleFeeder {
     std::atomic<float> bodyX{0},bodyY{0},bodyScale{1};
     std::atomic_bool stopping{false},permitted{false},enabled{true};
     void run() {
+        RuntimeLog::write("event=feeder_started");
         HRESULT com=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED|COINIT_DISABLE_OLE1DDE);
-        if(FAILED(com)) return;
+        if(FAILED(com)) {RuntimeLog::write("event=feeder_com_failed hresult=0x%08lX",static_cast<unsigned long>(com));return;}
         {
             RecycleShell shell;
             while(!stopping) {
@@ -378,6 +380,7 @@ class RecycleFeeder {
                         auto target=shell.visibleFile(nullptr,request,expected,true);
                         return target.token==request && std::hypot(bodyX.load()-target.point.x,bodyY.load()-target.point.y)<=22*bodyScale.load();
                     });
+                    RuntimeLog::write("event=feeding_result consumed=%d",eaten);
                     std::lock_guard<std::mutex> lock(mutex);
                     snapshot.receipt++;snapshot.consumed=eaten;snapshot.receiptName=name;
                     if(!eaten && permitted && epoch==generation) blocked.insert(request);
@@ -399,6 +402,7 @@ class RecycleFeeder {
             }
         }
         CoUninitialize();
+        RuntimeLog::write("event=feeder_stopped");
     }
 public:
     void start() {if(!worker.joinable()) worker=std::thread([this](){run();});}

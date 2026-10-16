@@ -29,6 +29,7 @@ V mix(V a,V b,float t) { return a*(1-t)+b*t; }
 #include "physics.h"
 #include "i18n.h"
 #include "startup.h"
+#include "runtime_log.h"
 #include "behavior.h"
 #include "recycle_food.h"
 #include "feeding.h"
@@ -139,6 +140,7 @@ public:
         MoveFileExW(temporary.c_str(),uiSettingsPath.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH);
     }
     void reportStartupError(LONG error) {
+        RuntimeLog::write("event=startup_registration status=%ld",error);
         if(error==ERROR_SUCCESS)return;
         std::wstring message=std::wstring(ui(Text::StartupError))+std::to_wstring(error);
         MessageBoxW(hwnd,message.c_str(),ui(Text::Title),MB_OK|MB_ICONERROR);
@@ -659,13 +661,14 @@ public:
         AppendMenuW(m,MF_SEPARATOR,0,nullptr); AppendMenuW(m,MF_STRING,8,ui(Text::Quit));
         POINT p; GetCursorPos(&p); SetForegroundWindow(hwnd);
         int cmd=TrackPopupMenu(m,TPM_RETURNCMD|TPM_RIGHTBUTTON,p.x,p.y,0,hwnd,nullptr);
+        if(cmd)RuntimeLog::write("event=menu_command id=%d",cmd);
         DestroyMenu(m); PostMessageW(hwnd,WM_NULL,0,0);
         switch(cmd) {
             case 1: paused=!paused;if(paused)stopEating();break; case 2: follow=!follow; chooseTarget(); break;
             case 3: speed=38; break; case 4: speed=75; break; case 5: speed=135; break;
             case 6: scale=scale<1?1.f:(scale<1.2f?1.3f:.7f); resetFeet(); break;
             case 7: GetCursorPos(&p); monitorAt(p); break;
-            case 8: DestroyWindow(hwnd); break;
+            case 8: RuntimeLog::write("event=exit_request reason=tray_menu");DestroyWindow(hwnd); break;
             case 9: rainbow=!rainbow; break;
             case 10: mind.autoEat=!mind.autoEat;feeder.setEnabled(mind.autoEat);stopEating();memoryDirty=true;break;
             case 11: showHungerPanel=!showHungerPanel;break;
@@ -821,27 +824,44 @@ int interactionTest(Spider& s) {
 #include "feeding_tests.h"
 #include "i18n_tests.h"
 #include "startup_tests.h"
+#include "logging_tests.h"
 LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l) {
     static UINT taskbar=RegisterWindowMessageW(L"TaskbarCreated");
-    if(m==taskbar && app) { app->addTray(); return 0; }
+    if(m==taskbar && app) {RuntimeLog::write("event=taskbar_recreated");app->addTray(); return 0; }
     switch(m) {
-        case WM_TIMER: if(w==2) DestroyWindow(h); else if(w==3) app->inputTestTick(); else app->tick(); return 0;
-        case WM_HOTKEY: if(w==1) {app->paused=!app->paused;if(app->paused)app->stopEating();} if(w==2) DestroyWindow(h);
+        case WM_TIMER: if(w==2) DestroyWindow(h); else if(w==3) app->inputTestTick(); else {
+            app->tick();static ULONGLONG lastHeartbeat=GetTickCount64();
+            if(GetTickCount64()-lastHeartbeat>=60000) {
+                lastHeartbeat=GetTickCount64();
+                RuntimeLog::write("event=heartbeat state=%ls paused=%d hunger=%.1f energy=%.2f x=%.0f y=%.0f gdi=%lu",
+                    CreatureMind::label(app->mind.state,Language::English),app->paused,app->mind.hunger,app->mind.energy,
+                    app->pos.x,app->pos.y,GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS));
+            }
+        } return 0;
+        case WM_HOTKEY: RuntimeLog::write("event=hotkey id=%llu",static_cast<unsigned long long>(w));
+                        if(w==1) {app->paused=!app->paused;if(app->paused)app->stopEating();}
+                        if(w==2) {RuntimeLog::write("event=exit_request reason=hotkey_ctrl_alt_q");DestroyWindow(h);}
                         if(w==3) app->endGrab(true); return 0;
         case TRAY: if(l==WM_RBUTTONUP || l==WM_CONTEXTMENU) app->menu();
                    if(l==WM_LBUTTONDBLCLK) {app->paused=!app->paused;if(app->paused)app->stopEating();} return 0;
         case WM_DISPLAYCHANGE: { POINT p; GetCursorPos(&p); app->monitorAt(p); return 0; }
-        case WM_DESTROY: app->stopEating();KillTimer(h,1); KillTimer(h,2); KillTimer(h,3); UnregisterHotKey(h,1); UnregisterHotKey(h,2); PostQuitMessage(0); return 0;
+        case WM_CLOSE: RuntimeLog::write("event=exit_request reason=window_close");break;
+        case WM_QUERYENDSESSION: RuntimeLog::write("event=session_end_requested flags=0x%llX",static_cast<unsigned long long>(l));return TRUE;
+        case WM_ENDSESSION: RuntimeLog::write("event=session_end confirmed=%d",w!=0);break;
+        case WM_DESTROY: RuntimeLog::write("event=window_destroyed");app->stopEating();KillTimer(h,1); KillTimer(h,2); KillTimer(h,3); UnregisterHotKey(h,1); UnregisterHotKey(h,2); PostQuitMessage(0); return 0;
         case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
     }
     return DefWindowProcW(h,m,w,l);
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
     HANDLE mutex=CreateMutexW(nullptr,TRUE,L"Local\\NeonSpider.DesktopPet");
-    if(GetLastError()==ERROR_ALREADY_EXISTS) { if(mutex) CloseHandle(mutex); return 0; }
+    DWORD mutexError=GetLastError();
+    if(mutexError==ERROR_ALREADY_EXISTS) { if(mutex) CloseHandle(mutex); return 0; }
+    if(wcsstr(command,L"--")==nullptr)RuntimeLog::start();
+    if(!mutex)RuntimeLog::write("event=mutex_failed error=%lu",mutexError);
     HRESULT com=CoInitializeEx(nullptr,COINIT_APARTMENTTHREADED|COINIT_DISABLE_OLE1DDE);
     ULONG_PTR token; GdiplusStartupInput startup;
-    if(GdiplusStartup(&token,&startup,nullptr)!=Ok) {if(SUCCEEDED(com))CoUninitialize();CloseHandle(mutex);return 1;}
+    if(GdiplusStartup(&token,&startup,nullptr)!=Ok) {RuntimeLog::write("event=gdiplus_failed");RuntimeLog::finish(1);if(SUCCEEDED(com))CoUninitialize();CloseHandle(mutex);return 1;}
     int result=0;
     {
         Spider spider; app=&spider;
@@ -849,7 +869,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
         if(spider.living) spider.loadMemory();
         POINT p; GetCursorPos(&p); spider.monitorAt(p); spider.initSurface();
         if(spider.living) {spider.saveMemory();spider.feeder.setEnabled(spider.mind.autoEat);spider.feeder.start();spider.feedingLive=true;}
-        if(wcsstr(command,L"--startup-test")) {result=startupTest();}
+        if(wcsstr(command,L"--logging-test")) {result=loggingTest();}
+        else if(wcsstr(command,L"--startup-test")) {result=startupTest();}
         else if(wcsstr(command,L"--i18n-test")) {result=i18nTest(spider);}
         else if(wcsstr(command,L"--feeding-canary-test")) {result=feedingCanaryTest();}
         else if(wcsstr(command,L"--feeding-test")) {result=feedingTest(spider);}
@@ -863,16 +884,16 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
             RegisterClassW(&wc);
             spider.hwnd=CreateWindowExW(WS_EX_LAYERED|WS_EX_TRANSPARENT|WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE,
                 wc.lpszClassName,L"Silkstride",WS_POPUP,0,0,CANVAS,CANVAS,nullptr,nullptr,instance,nullptr);
-            if(!spider.hwnd || !spider.dc || !spider.dib) result=2;
+            if(!spider.hwnd || !spider.dc || !spider.dib) {RuntimeLog::write("event=window_init_failed error=%lu",GetLastError());result=2;}
             else {
                 // Observe screen coordinates without activating the overlay. Swallow
                 // only a foot's left-button down/up pair; every other click passes on.
                 spider.mouseHook=SetWindowsHookExW(WH_MOUSE_LL,MouseHook,instance,0);
-                if(!spider.mouseHook) result=5;
+                if(!spider.mouseHook) {RuntimeLog::write("event=mouse_hook_failed error=%lu",GetLastError());result=5;}
                 spider.addTray(); spider.render(); ShowWindow(spider.hwnd,SW_SHOWNOACTIVATE);
                 if(spider.living&&!spider.inputTest)spider.reportStartupError(spider.startup.initialize());
-                RegisterHotKey(spider.hwnd,1,MOD_CONTROL|MOD_ALT|MOD_NOREPEAT,'S');
-                RegisterHotKey(spider.hwnd,2,MOD_CONTROL|MOD_ALT|MOD_NOREPEAT,'Q');
+                if(!RegisterHotKey(spider.hwnd,1,MOD_CONTROL|MOD_ALT|MOD_NOREPEAT,'S'))RuntimeLog::write("event=hotkey_registration_failed key=S error=%lu",GetLastError());
+                if(!RegisterHotKey(spider.hwnd,2,MOD_CONTROL|MOD_ALT|MOD_NOREPEAT,'Q'))RuntimeLog::write("event=hotkey_registration_failed key=Q error=%lu",GetLastError());
                 SetTimer(spider.hwnd,1,16,nullptr);
                 if(wcsstr(command,L"--smoke-test")) SetTimer(spider.hwnd,2,3000,nullptr);
                 if(wcsstr(command,L"--input-test")) {
@@ -890,11 +911,14 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
                     SetWindowPos(spider.hwnd,HWND_TOPMOST,0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE);
                     SetTimer(spider.hwnd,3,150,nullptr);
                 }
-                MSG msg; while(GetMessageW(&msg,nullptr,0,0)>0) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+                RuntimeLog::write("event=window_ready");
+                MSG msg;BOOL messageResult;
+                while((messageResult=GetMessageW(&msg,nullptr,0,0))>0) { TranslateMessage(&msg); DispatchMessageW(&msg); }
+                if(messageResult==-1) {RuntimeLog::write("event=message_loop_failed error=%lu",GetLastError());result=4;}
                 if(spider.inputTest && spider.inputFailures) result=7;
             }
         }
         app=nullptr;
     }
-    GdiplusShutdown(token);if(SUCCEEDED(com))CoUninitialize();if(mutex)CloseHandle(mutex);return result;
+    GdiplusShutdown(token);if(SUCCEEDED(com))CoUninitialize();if(mutex)CloseHandle(mutex);RuntimeLog::finish(result);return result;
 }

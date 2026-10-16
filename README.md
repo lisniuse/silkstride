@@ -103,11 +103,23 @@ The app uses these files under `%LOCALAPPDATA%\NeonSpider\`:
 | --- | --- |
 | `creature.state` | Personality, needs, interaction memory, hunger, feeding toggle |
 | `ui.settings` | Chosen interface language |
+| `runtime.log` | Startup, exit reasons, exceptions, and a one-minute health heartbeat |
+| `runtime.previous.log` | Previous log after rotation |
 
 `NeonSpider` is the pre-release data-directory name, retained to preserve existing
 pets. The app works locally and has no telemetry or network dependency. It samples
 mouse movement for behavior and uses Shell/UI Automation to locate visible
 Recycle Bin items. Personal state and test outputs are excluded from this repo.
+
+If the pet disappears, check `runtime.log`. Normal exits distinguish the tray
+menu, `Ctrl+Alt+Q`, window-close requests, and Windows session ending. Unhandled
+exceptions record their code and address; C++ termination is logged too. If a
+session lacks its final exit record, the next launch flags it as incomplete.
+This can indicate a crash, forced termination, power loss, or another abrupt
+stop; the marker alone cannot determine which. Some fail-fast failures can bypass
+exception handlers. Timestamps use UTC (`Z`; add 8 hours for China time).
+Logs do not record mouse trails, file contents, or the names of eaten files.
+A log of 1 MiB or more rotates on launch, retaining one previous file.
 
 ### Build
 
@@ -153,6 +165,7 @@ fails or does not produce a report. For the manual arguments below, run
 | `--feeding-test` | Mock feeding, interruption, filename approach, persistence; no real deletions |
 | `--i18n-test` | Both catalogs, state labels, locale fallback, preference serialization, panel previews |
 | `--startup-test` | First-launch registration, opt-out persistence, quoted paths, isolated registry cleanup |
+| `--logging-test` | Durable events, exception formatting, incomplete-session detection, rotation and fixture cleanup |
 | `--smoke-test` | Real window, tray, and hook; exits after three seconds |
 | `--preview` | Export `preview.png` without starting autonomous behavior |
 | `--input-test` | Moves the cursor and exercises real mouse input; restores cursor position |
@@ -163,7 +176,8 @@ The canary test requires a visible Recycle Bin window, may select/scroll to its
 test file, and leaves that file in the bin if validation fails. It never enables
 ordinary feeding or submits pre-existing files for deletion. Diagnostic modes do
 not load or overwrite pet memory. The startup test uses its own temporary GUID
-registry subtree and never modifies real startup entries. CI runs the six
+registry subtree and never modifies real startup entries. Logging tests use
+temporary files under `out/tests/`, not personal runtime logs. CI runs the seven
 non-destructive suites and uploads the Windows executable and reports.
 
 See [AGENTS.md](AGENTS.md) for contributor conventions. **Commit messages must use
@@ -255,10 +269,19 @@ Released under the [MIT License](LICENSE).
 | --- | --- |
 | `creature.state` | 性格、需求、互动记忆、饥饿和进食开关 |
 | `ui.settings` | 界面语言偏好 |
+| `runtime.log` | 启动、退出原因、异常和每分钟运行状态 |
+| `runtime.previous.log` | 轮换时保留的上一份日志 |
 
 `NeonSpider` 是早期版本的数据目录名，为保留原有宠物继续使用。程序在本地运行，无遥测或
 联网依赖；采样鼠标移动用于行为判断，通过 Shell 与 UI Automation 定位可见回收站条目。
 个人存档和测试输出不进入源码仓库。
+
+如果宠物突然消失，可以查看 `runtime.log`：正常退出会区分托盘菜单、`Ctrl+Alt+Q`、
+窗口关闭请求和 Windows 会话结束。未处理异常记录异常代码和地址，C++ 异常终止也会记录。
+上次运行缺少结束记录时，下次启动会标记为“上次会话未完成”；这可能来自崩溃、强制结束、
+断电等，不能单凭此标记确认具体原因。部分快速失败异常可能绕过异常处理器。
+时间使用 UTC（末尾 `Z`，北京时间需加 8 小时）。不记录鼠标轨迹、文件内容或吃掉的文件名。
+日志达到 1 MiB 时在启动时轮换，保留一份旧日志。
 
 ### 编译
 
@@ -301,6 +324,7 @@ pwsh -NoProfile -File ./test.ps1 -Suite startup
 | `--feeding-test` | 模拟进食、中断、靠近文件名和存档；不删除真实文件 |
 | `--i18n-test` | 中英文文案、行为标签、语言回退、偏好序列化和面板预览 |
 | `--startup-test` | 首次注册、关闭后不重建、路径引号和隔离注册表清理 |
+| `--logging-test` | 事件落盘、异常格式、未完成会话识别、轮换和测试文件清理 |
 | `--smoke-test` | 实际窗口、托盘与钩子，三秒后退出 |
 | `--preview` | 导出 `preview.png`，不启动自主行为 |
 | `--input-test` | 短暂移动鼠标，验证真实输入，结束后恢复光标 |
@@ -309,7 +333,8 @@ pwsh -NoProfile -File ./test.ps1 -Suite startup
 
 Canary 测试要求真实回收站窗口可见，会选中并滚动到自己的测试条目；失败时可能将测试文件
 留在回收站。它不会开启日常进食或提交原有文件进行删除。诊断模式不加载或覆盖宠物存档。
-开机启动测试使用自己临时创建的 GUID 注册表子树，不修改真实启动项。CI 运行六组
+开机启动测试使用自己临时创建的 GUID 注册表子树，不修改真实启动项。日志测试在
+`out/tests/` 使用临时文件，不修改个人运行日志。CI 运行七组
 无破坏性的检查，并上传 Windows 程序和报告。
 
 贡献约定见 [AGENTS.md](AGENTS.md)。**提交信息必须使用 Conventional Commits（CC）风格**，
