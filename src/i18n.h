@@ -22,7 +22,7 @@ class Localizer {
         {L"饥饿",L"Hunger"},{L"精力",L"Energy"},{L"性格：",L"Personality: "},
         {L"大胆",L"bold"},{L"谨慎",L"cautious"},{L"活跃",L"active"},{L"悠闲",L"easygoing"},
         {L"暂停  Ctrl+Alt+S",L"Pause  Ctrl+Alt+S"},
-        {L"跟随鼠标",L"Follow mouse"},{L"彩虹循环配色",L"Cycle rainbow colors"},
+        {L"跟随鼠标",L"Follow mouse"},{L"彩虹循环配色（关闭为自然色）",L"Cycle rainbow colors (off: natural)"},
         {L"回收站进食（逐个永久删除文件）",L"Eat Recycle Bin files (permanently delete one at a time)"},
         {L"显示饥饿提示面板",L"Show hunger panel"},
         {L"慢速",L"Slow"},{L"正常速度",L"Normal speed"},{L"快速",L"Fast"},

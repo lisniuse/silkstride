@@ -84,7 +84,7 @@ public:
     float angularSpeed=0, stepCooldown=0, stride=0, bodyYaw=0;
     float accumulator=0;
     V bodyOffset{}, bodySpring{};
-    bool paused=false, follow=false, rainbow=true, showHungerPanel=false;
+    bool paused=false, follow=false, rainbow=false, showHungerPanel=false;
     HDC dc=nullptr;
     HBITMAP dib=nullptr;
     HGDIOBJ old=nullptr;
@@ -534,13 +534,23 @@ public:
         for(auto& l:legs) for(int j=0;j<5;++j) l.joints[j]=physics.particles[l.ids[j]].p;
     }
     Color pigment(int segment=0) const {
-        float hue=rainbow?std::fmod(elapsed*.055f,1.f):.51f;
+        if(!rainbow) {
+            static const Color legColors[]={Color(255,149,112,66),Color(255,143,111,69),
+                                             Color(255,125,94,59),Color(255,95,71,45)};
+            return legColors[std::clamp(segment,0,3)];
+        }
+        float hue=std::fmod(elapsed*.055f,1.f);
         float h=hue*6, c=.78f, x=c*(1-std::abs(std::fmod(h,2.f)-1));
         float r=0,g=0,b=0;
         if(h<1) {r=c;g=x;} else if(h<2) {r=x;g=c;} else if(h<3) {g=c;b=x;}
         else if(h<4) {g=x;b=c;} else if(h<5) {r=x;b=c;} else {r=c;b=x;}
         float shade=1-segment*.13f;
         return Color(255,BYTE((r+.18f)*255*shade),BYTE((g+.18f)*255*shade),BYTE((b+.18f)*255*shade));
+    }
+    Color bodyPigment(int part) const {
+        if(rainbow)return pigment(part==0?0:1);
+        static const Color shellColors[]={Color(255,170,132,78),Color(255,110,78,46),Color(255,78,57,38)};
+        return shellColors[std::clamp(part,0,2)];
     }
     void line(Graphics& g,V a,V b,Color c,float w) {
         Pen pen(c,w*scale); pen.SetStartCap(LineCapRound); pen.SetEndCap(LineCapRound);
@@ -559,6 +569,8 @@ public:
                 // A fine shadow keeps the colored silhouette visible on light windows.
                 line(g,a+V{.7f,1.2f},b+V{.7f,1.2f},Color(90,8,13,19),widths[j]+1);
                 line(g,a,b,pigment(j),widths[j]);
+                if(!rainbow&&(j==1||j==2))for(float start:{.40f,.72f})
+                    line(g,mix(a,b,start),mix(a,b,start+.09f),Color(245,64,49,34),widths[j]*1.04f);
                 if(j>0) dot(g,a,widths[j]*.58f,pigment(j));
             }
             V toe=screen(legs[i].joints[4]);
@@ -571,11 +583,18 @@ public:
         }
         V abdomen=screen(physics.particles[2].p),head=screen(physics.particles[1].p);
         // Three round body masses match the reference's small organic silhouette.
-        line(g,abdomen,head,pigment(1),5);
+        line(g,abdomen,head,bodyPigment(1),5);
         dot(g,abdomen+V{1,1},10.3f,Color(100,7,10,17));
         float breath=living?1+.025f*std::sin(elapsed*2.2f):1.f;
-        dot(g,abdomen,10*breath,pigment()); dot(g,center,5.5f,pigment()); dot(g,head,5,pigment());
-        if(living) for(int side:{-1,1}) dot(g,head+local(3*scale,side*2*scale),.9f,Color(220,20,30,40));
+        dot(g,abdomen,10*breath,bodyPigment(0));
+        if(!rainbow) {
+            V axis=unit(head-abdomen),across{-axis.y,axis.x};
+            line(g,abdomen-axis*(5*scale),abdomen+axis*(5*scale),Color(230,196,157,101),2.4f);
+            for(float x:{-3.f,0.f,3.f})for(int side:{-1,1})
+                line(g,abdomen+axis*(x*scale),abdomen+axis*((x-2)*scale)+across*(side*4*scale),Color(225,93,65,34),1.1f);
+        }
+        dot(g,center,5.5f,bodyPigment(1));dot(g,head,5,bodyPigment(2));
+        if(living) for(int side:{-1,1}) dot(g,head+local(3*scale,side*2*scale),.9f,rainbow?Color(220,20,30,40):Color(245,18,14,10));
         dot(g,abdomen+bodyLocal(2*scale,-3*scale),2.8f,Color(45,255,255,255));
         if(living && showHungerPanel) {
             RectF panel(origin.x-115,origin.y+38,230,48);
@@ -898,7 +917,10 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
         else if(wcsstr(command,L"--behavior-test")) { result=behaviorTest(spider); }
         else if(wcsstr(command,L"--interaction-test")) { result=interactionTest(spider); }
         else if(wcsstr(command,L"--motion-test")) { result=motionTest(spider); }
-        else if(wcsstr(command,L"--preview")) { spider.render(L"preview.png"); }
+        else if(wcsstr(command,L"--preview")) {
+            spider.rainbow=wcsstr(command,L"--preview-rainbow")!=nullptr;
+            spider.render(spider.rainbow?L"preview-rainbow.png":L"preview.png");
+        }
         else {
             WNDCLASSW wc{}; wc.lpfnWndProc=WndProc; wc.hInstance=instance; wc.lpszClassName=L"NeonSpiderOverlay";
             RegisterClassW(&wc);

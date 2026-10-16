@@ -10,8 +10,8 @@ A tiny articulated spider that wanders your Windows desktop.
 ## English
 
 Silkstride is a native **C++17 / Win32 / GDI+** desktop pet for Windows 10/11 x64.
-Eight articulated legs, a shared Verlet physics body, rainbow colors, and a small
-behavior system bring it to life. No browser engine, third-party runtime, or admin
+Eight articulated legs, a shared Verlet physics body, natural banded coloring,
+optional rainbow cycling, and a small behavior system bring it to life. No browser engine, third-party runtime, or admin
 rights required. Startup with Windows is enabled on the first normal launch.
 
 ### Download and run
@@ -40,6 +40,10 @@ in the tray menu. Use disposable files when trying this feature.
   planted contacts, alternating steps, and an inertial body. This is a stylized
   four-segment model, not a one-to-one anatomical model. The short distal foot
   continues the lower leg with a subtle bend instead of folding back into a hook.
+- **Natural regional colors by default.** A dark brown head/chest, a lighter
+  patterned abdomen, and brown legs with dark bands. Enable rainbow cycling in
+  the tray for synchronized changing colors; turning it off restores natural
+  colors. Each launch starts with the natural palette.
 - **Can be picked up.** Hold any foot tip with the left mouse button. The other
   legs flail while the body hangs from your pointer. Release gently or fling it;
   it lands and recovers its footing. Other desktop clicks pass through.
@@ -180,6 +184,7 @@ fails or does not produce a report. For the manual arguments below, run
 | `--launch-test` | Owned kill-on-close job, independent diagnostic relaunch, survival after launcher cleanup |
 | `--smoke-test` | Real window, tray, and hook; exits after three seconds |
 | `--preview` | Export `preview.png` without starting autonomous behavior |
+| `--preview-rainbow` | Export `preview-rainbow.png` showing the optional rainbow palette |
 | `--input-test` | Moves the cursor and exercises real mouse input; restores cursor position |
 | `--recycle-probe` | Read-only view and filename-coordinate inspection |
 | `--feeding-canary-test` | Recycles and permanently deletes only its own fresh GUID-named disposable file |
@@ -209,7 +214,8 @@ Released under the [MIT License](LICENSE).
 ## 简体中文
 
 丝行（Silkstride）是一个原生 **C++17 / Win32 / GDI+** 桌面宠物，支持 Windows
-10/11 x64。八条四段关节腿与身体共享 Verlet 物理系统，支持循环彩虹配色和自主行为。
+10/11 x64。八条四段关节腿与身体共享 Verlet 物理系统，默认自然分区配色和腿部环纹，
+也可切换循环彩虹配色，具有自主行为。
 无需浏览器引擎、额外运行库或管理员权限。首次正常运行默认加入开机启动。
 
 ### 下载与运行
@@ -231,6 +237,8 @@ Released under the [MIT License](LICENSE).
 
 - **用脚牵动身体行走**：四段关节、距离和角度约束、固定落脚点、交替换脚，身体有惯性。
   四段是简化的视觉模型，并非真实解剖的一一对应；末端足节缩短、顺势轻弯，不再反折成钩子。
+- **默认自然分区配色**：头胸部深褐色，腹部为较浅的暖褐色并带细纹，腿部有深色环带。
+  托盘可开启彩虹循环，使全身同步变色；关闭后恢复自然色。每次启动默认使用自然配色。
 - **抓脚、挣扎和甩动**：左键按住任意脚尖，身体悬挂，其他七条腿自由挣扎。轻放或甩出后，
   它会落地并恢复支撑。其他桌面点击正常穿透。
 - **自主生活节奏**：探索、停下观察、好奇靠近、躲避快速逼近的鼠标、去角落休息、整理腿脚。
@@ -349,6 +357,7 @@ pwsh -NoProfile -File ./test.ps1 -Suite startup
 | `--launch-test` | 隔离的“关闭即结束进程”任务组、独立启动、宿主清理后仍存活 |
 | `--smoke-test` | 实际窗口、托盘与钩子，三秒后退出 |
 | `--preview` | 导出 `preview.png`，不启动自主行为 |
+| `--preview-rainbow` | 导出可选彩虹配色的 `preview-rainbow.png` |
 | `--input-test` | 短暂移动鼠标，验证真实输入，结束后恢复光标 |
 | `--recycle-probe` | 只读检查实际回收站窗口和文件名坐标 |
 | `--feeding-canary-test` | 仅回收并永久删除自己新建的 GUID 一次性测试文件 |
