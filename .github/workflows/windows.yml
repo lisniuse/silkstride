@@ -21,7 +21,7 @@ jobs:
       - name: Run non-destructive diagnostics
         working-directory: build
         run: |
-          foreach ($name in @('motion', 'interaction', 'behavior', 'feeding', 'i18n')) {
+          foreach ($name in @('motion', 'interaction', 'behavior', 'feeding', 'i18n', 'startup')) {
             $process = Start-Process ./Silkstride.exe -ArgumentList "--$name-test" -Wait -PassThru
             Get-Content "$name-test.txt"
             if ($process.ExitCode -ne 0) { throw "$name test failed: $($process.ExitCode)" }

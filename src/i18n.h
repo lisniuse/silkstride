@@ -11,7 +11,7 @@ enum class Text {
     Pause, Follow, Rainbow, AutoEat, HungerPanel, Slow, Normal, Fast, Size, MoveMonitor, Quit,
     Ate, Eating, Hungry, NotHungry, Skipped,
     Wake, Prepare, Explore, Observe, Approach, Flee, Shelter, Rest, Groom, Recover, Held, SeekFood, Eat,
-    Count
+    Startup, StartupError, Count
 };
 
 class Localizer {
@@ -37,7 +37,9 @@ class Localizer {
         {L"寻找角落",L"Seeking shelter"},{L"休息恢复",L"Resting"},
         {L"整理腿脚",L"Grooming"},{L"落地站稳",L"Recovering footing"},
         {L"被抓住了",L"Being held"},{L"去回收站找吃的",L"Seeking Recycle Bin food"},
-        {L"回收站进食",L"Eating in Recycle Bin"}
+        {L"回收站进食",L"Eating in Recycle Bin"},
+        {L"开机启动",L"Start with Windows"},
+        {L"无法更新开机启动设置。错误代码：",L"Could not update startup registration. Error code: "}
     }};
 public:
     Language language=systemLanguage(GetUserDefaultUILanguage());

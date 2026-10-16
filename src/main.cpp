@@ -28,6 +28,7 @@ V unit(V p) { float l=length(p); return l>0.001f?p*(1/l):V{1,0}; }
 V mix(V a,V b,float t) { return a*(1-t)+b*t; }
 #include "physics.h"
 #include "i18n.h"
+#include "startup.h"
 #include "behavior.h"
 #include "recycle_food.h"
 #include "feeding.h"
@@ -47,6 +48,7 @@ public:
     CrawlPhysics physics;
     CreatureMind mind;
     Localizer ui;
+    StartupRegistration startup;
     RecycleFeeder feeder;
     RecycleFoodView food;
     FeedingCycle feeding;
@@ -135,6 +137,11 @@ public:
         std::wstring temporary=uiSettingsPath+L".tmp";
         {std::ofstream file{std::filesystem::path(temporary)};if(!file)return;ui.write(file);if(!file)return;}
         MoveFileExW(temporary.c_str(),uiSettingsPath.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH);
+    }
+    void reportStartupError(LONG error) {
+        if(error==ERROR_SUCCESS)return;
+        std::wstring message=std::wstring(ui(Text::StartupError))+std::to_wstring(error);
+        MessageBoxW(hwnd,message.c_str(),ui(Text::Title),MB_OK|MB_ICONERROR);
     }
     void saveMemory() {
         if(!memoryEnabled) return;
@@ -641,6 +648,7 @@ public:
         AppendMenuW(m,MF_STRING|(rainbow?MF_CHECKED:0),9,ui(Text::Rainbow));
         AppendMenuW(m,MF_STRING|(mind.autoEat?MF_CHECKED:0),10,ui(Text::AutoEat));
         AppendMenuW(m,MF_STRING|(showHungerPanel?MF_CHECKED:0),11,ui(Text::HungerPanel));
+        AppendMenuW(m,MF_STRING|(startup.enabled()?MF_CHECKED:0),14,ui(Text::Startup));
         HMENU languages=CreatePopupMenu();
         AppendMenuW(languages,MF_STRING|(ui.language==Language::Chinese?MF_CHECKED:0),12,L"简体中文");
         AppendMenuW(languages,MF_STRING|(ui.language==Language::English?MF_CHECKED:0),13,L"English");
@@ -662,6 +670,7 @@ public:
             case 10: mind.autoEat=!mind.autoEat;feeder.setEnabled(mind.autoEat);stopEating();memoryDirty=true;break;
             case 11: showHungerPanel=!showHungerPanel;break;
             case 12: case 13: ui.language=cmd==12?Language::Chinese:Language::English;saveUiSettings();trayTimer=1;render();break;
+            case 14: reportStartupError(startup.setEnabled(!startup.enabled()));break;
         }
     }
     ~Spider() {
@@ -811,6 +820,7 @@ int interactionTest(Spider& s) {
 #include "behavior_tests.h"
 #include "feeding_tests.h"
 #include "i18n_tests.h"
+#include "startup_tests.h"
 LRESULT CALLBACK WndProc(HWND h,UINT m,WPARAM w,LPARAM l) {
     static UINT taskbar=RegisterWindowMessageW(L"TaskbarCreated");
     if(m==taskbar && app) { app->addTray(); return 0; }
@@ -839,7 +849,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
         if(spider.living) spider.loadMemory();
         POINT p; GetCursorPos(&p); spider.monitorAt(p); spider.initSurface();
         if(spider.living) {spider.saveMemory();spider.feeder.setEnabled(spider.mind.autoEat);spider.feeder.start();spider.feedingLive=true;}
-        if(wcsstr(command,L"--i18n-test")) {result=i18nTest(spider);}
+        if(wcsstr(command,L"--startup-test")) {result=startupTest();}
+        else if(wcsstr(command,L"--i18n-test")) {result=i18nTest(spider);}
         else if(wcsstr(command,L"--feeding-canary-test")) {result=feedingCanaryTest();}
         else if(wcsstr(command,L"--feeding-test")) {result=feedingTest(spider);}
         else if(wcsstr(command,L"--recycle-probe")) {result=recycleProbe();}
@@ -859,6 +870,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
                 spider.mouseHook=SetWindowsHookExW(WH_MOUSE_LL,MouseHook,instance,0);
                 if(!spider.mouseHook) result=5;
                 spider.addTray(); spider.render(); ShowWindow(spider.hwnd,SW_SHOWNOACTIVATE);
+                if(spider.living&&!spider.inputTest)spider.reportStartupError(spider.startup.initialize());
                 RegisterHotKey(spider.hwnd,1,MOD_CONTROL|MOD_ALT|MOD_NOREPEAT,'S');
                 RegisterHotKey(spider.hwnd,2,MOD_CONTROL|MOD_ALT|MOD_NOREPEAT,'Q');
                 SetTimer(spider.hwnd,1,16,nullptr);

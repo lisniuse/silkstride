@@ -11,8 +11,8 @@ A tiny articulated spider that wanders your Windows desktop.
 
 Silkstride is a native **C++17 / Win32 / GDI+** desktop pet for Windows 10/11 x64.
 Eight articulated legs, a shared Verlet physics body, rainbow colors, and a small
-behavior system bring it to life. No browser engine, third-party runtime, admin
-rights, or startup registration required.
+behavior system bring it to life. No browser engine, third-party runtime, or admin
+rights required. Startup with Windows is enabled on the first normal launch.
 
 ### Download and run
 
@@ -54,11 +54,27 @@ in the tray menu. Use disposable files when trying this feature.
 | Speed, size, rainbow, mouse following, monitor | Right-click the tray icon |
 | Show / hide hunger panel | Tray → **Show hunger panel** |
 | Change language | Tray → **Language / 语言** |
+| Start with Windows | Tray → **Start with Windows** (enabled on first launch) |
 
 The hunger panel starts **hidden on every launch**. The tray tooltip and menu
 still show hunger and energy. Hiding the panel does not pause feeding.
 Speed, size, pause, and panel visibility reset on launch; language, personality,
 memory, hunger, and the feeding toggle persist.
+
+### Start with Windows
+
+The first normal launch (including the first launch after upgrading from v0.1.0)
+adds a per-user Windows sign-in startup entry. Uncheck **Start with Windows** in
+the tray menu to remove it. Later launches respect your choice and do not add it
+back. Diagnostic modes never configure real startup entries.
+
+Registration uses the `Silkstride` value under
+`HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`; a first-run
+marker is stored under `HKEY_CURRENT_USER\Software\Silkstride`. No administrator
+rights are needed. Keep the executable at its registered location; after moving
+it, toggle startup off and on to update the path. Before removing the portable
+app, turn startup off to remove its entry. Windows may delay startup or override
+it through its own startup-app controls.
 
 ### Hunger and feeding
 
@@ -126,6 +142,7 @@ the corresponding `*-test.txt` report; the process exits nonzero on failure.
 | `--behavior-test` | Fear, curiosity, rest, memory, two-minute physical simulation |
 | `--feeding-test` | Mock feeding, interruption, filename approach, persistence; no real deletions |
 | `--i18n-test` | Both catalogs, state labels, locale fallback, preference serialization, panel previews |
+| `--startup-test` | First-launch registration, opt-out persistence, quoted paths, isolated registry cleanup |
 | `--smoke-test` | Real window, tray, and hook; exits after three seconds |
 | `--preview` | Export `preview.png` without starting autonomous behavior |
 | `--input-test` | Moves the cursor and exercises real mouse input; restores cursor position |
@@ -135,8 +152,9 @@ the corresponding `*-test.txt` report; the process exits nonzero on failure.
 The canary test requires a visible Recycle Bin window, may select/scroll to its
 test file, and leaves that file in the bin if validation fails. It never enables
 ordinary feeding or submits pre-existing files for deletion. Diagnostic modes do
-not load or overwrite pet memory. CI runs only the five non-destructive simulation
-and localization suites, and uploads the Windows executable and reports.
+not load or overwrite pet memory. The startup test uses its own temporary GUID
+registry subtree and never modifies real startup entries. CI runs the six
+non-destructive suites and uploads the Windows executable and reports.
 
 See [AGENTS.md](AGENTS.md) for contributor conventions. **Commit messages must use
 Conventional Commits**, e.g. `feat(i18n): add a translation`.
@@ -154,7 +172,7 @@ Released under the [MIT License](LICENSE).
 
 丝行（Silkstride）是一个原生 **C++17 / Win32 / GDI+** 桌面宠物，支持 Windows
 10/11 x64。八条四段关节腿与身体共享 Verlet 物理系统，支持循环彩虹配色和自主行为。
-无需浏览器引擎、额外运行库或管理员权限，不设置开机启动。
+无需浏览器引擎、额外运行库或管理员权限。首次正常运行默认加入开机启动。
 
 ### 下载与运行
 
@@ -188,9 +206,22 @@ Released under the [MIT License](LICENSE).
 | 速度、大小、彩虹配色、跟随鼠标、切换屏幕 | 右键托盘图标 |
 | 显示、隐藏饥饿面板 | 托盘 → **显示饥饿提示面板** |
 | 切换语言 | 托盘 → **Language / 语言** |
+| 开机启动 | 托盘 → **开机启动**（首次运行默认开启） |
 
 饥饿面板**每次启动默认隐藏**，托盘提示和菜单仍可查看饥饿与精力。隐藏面板不影响进食。
 速度、大小、暂停和面板显示状态在启动时重置；语言、性格、记忆、饥饿和进食开关会保留。
+
+### 开机启动
+
+首次正常运行（包括从 v0.1.0 升级后第一次运行）会自动添加当前用户登录 Windows 时的
+启动项。右键托盘取消勾选 **开机启动** 即可移除；之后再次运行会尊重选择，不会自动加回来。
+所有诊断模式都不会配置真实启动项。
+
+启动项为注册表 `HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\Run`
+下的 `Silkstride` 值，首次配置标记保存在 `HKEY_CURRENT_USER\Software\Silkstride`，
+无需管理员权限。请保持程序所在位置不变；移动后关闭再开启此选项即可更新路径。删除便携版
+程序前可先关闭此选项以移除启动项。Windows 可能延后启动，系统自己的启动应用设置也可能
+覆盖此行为。
 
 ### 饥饿与回收站进食
 
@@ -251,6 +282,7 @@ cmake --build build/cmake --config Release
 | `--behavior-test` | 警觉、好奇、休息、记忆和两分钟真实物理模拟 |
 | `--feeding-test` | 模拟进食、中断、靠近文件名和存档；不删除真实文件 |
 | `--i18n-test` | 中英文文案、行为标签、语言回退、偏好序列化和面板预览 |
+| `--startup-test` | 首次注册、关闭后不重建、路径引号和隔离注册表清理 |
 | `--smoke-test` | 实际窗口、托盘与钩子，三秒后退出 |
 | `--preview` | 导出 `preview.png`，不启动自主行为 |
 | `--input-test` | 短暂移动鼠标，验证真实输入，结束后恢复光标 |
@@ -259,7 +291,8 @@ cmake --build build/cmake --config Release
 
 Canary 测试要求真实回收站窗口可见，会选中并滚动到自己的测试条目；失败时可能将测试文件
 留在回收站。它不会开启日常进食或提交原有文件进行删除。诊断模式不加载或覆盖宠物存档。
-CI 只运行五组无破坏性的模拟与语言检查，并上传 Windows 程序和报告。
+开机启动测试使用自己临时创建的 GUID 注册表子树，不修改真实启动项。CI 运行六组
+无破坏性的检查，并上传 Windows 程序和报告。
 
 贡献约定见 [AGENTS.md](AGENTS.md)。**提交信息必须使用 Conventional Commits（CC）风格**，
 例如 `feat(i18n): add a translation`。

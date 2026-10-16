@@ -36,5 +36,7 @@ Examples / 示例：
 - Never use a user's existing Recycle Bin files for tests. The canary test may
   delete only the unique disposable file it created / 测试只能删除自己创建的临时文件。
 - Run relevant diagnostics from `build/`. Non-destructive CI checks are motion,
-  interaction, behavior, feeding, and i18n tests. The input test moves the cursor;
+  interaction, behavior, feeding, i18n, and startup tests. Startup tests must use
+  isolated registry keys and never change actual sign-in startup entries.
+  The input test moves the cursor;
   the canary test performs a real deletion of its own disposable file.
