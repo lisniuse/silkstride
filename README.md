@@ -37,7 +37,9 @@ in the tray menu. Use disposable files when trying this feature.
 ### What it does
 
 - **Walks with its feet.** Four segments per leg, distance and angle constraints,
-  planted contacts, alternating steps, and an inertial body.
+  planted contacts, alternating steps, and an inertial body. This is a stylized
+  four-segment model, not a one-to-one anatomical model. The short distal foot
+  continues the lower leg with a subtle bend instead of folding back into a hook.
 - **Can be picked up.** Hold any foot tip with the left mouse button. The other
   legs flail while the body hangs from your pointer. Release gently or fling it;
   it lands and recovers its footing. Other desktop clicks pass through.
@@ -228,6 +230,7 @@ Released under the [MIT License](LICENSE).
 ### 功能
 
 - **用脚牵动身体行走**：四段关节、距离和角度约束、固定落脚点、交替换脚，身体有惯性。
+  四段是简化的视觉模型，并非真实解剖的一一对应；末端足节缩短、顺势轻弯，不再反折成钩子。
 - **抓脚、挣扎和甩动**：左键按住任意脚尖，身体悬挂，其他七条腿自由挣扎。轻放或甩出后，
   它会落地并恢复支撑。其他桌面点击正常穿透。
 - **自主生活节奏**：探索、停下观察、好奇靠近、躲避快速逼近的鼠标、去角落休息、整理腿脚。

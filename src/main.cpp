@@ -308,10 +308,17 @@ public:
         int row=i%4,side=i<4?-1:1;
         float forward=row<2?1.f:-1.f;
         V h=hip(i), f=home(i);
+        V knee=pos+bodyOffset+local((row==0?114.f:row==1?88.f:row==2?-88.f:-114.f)*scale,
+                                    (row==0||row==3?45.f:66.f)*side*scale);
+        V distal=unit(f-knee);float turn=side*.16f;
+        V toeDirection{distal.x*std::cos(turn)-distal.y*std::sin(turn),
+                       distal.x*std::sin(turn)+distal.y*std::cos(turn)};
+        // A short distal foot continues the shin with a slight mirrored bend.
+        // Its joint stays before the contact, rather than overshooting the toe
+        // and folding back into the conspicuous hook of the old silhouette.
+        V ankle=f-toeDirection*(8*scale);
         return {h,h+bodyLocal(forward*3*scale,side*9*scale),
-                pos+bodyOffset+local((row==0?78.f:row==1?60.f:row==2?-60.f:-78.f)*scale,
-                                     (row==0||row==3?45.f:66.f)*side*scale),
-                f+local(forward*10*scale,side*18*scale),f};
+                knee,ankle,f};
     }
     V home(int i) const {
         int side=i<4?-1:1, row=i%4;
@@ -546,7 +553,7 @@ public:
         auto screen=[&](V p) { return p-pos+origin; };
         V center=origin+bodyOffset;
         for(int i=0;i<8;++i) {
-            static const float widths[]={3.8f,3.f,2.f,1.15f};
+            static const float widths[]={3.8f,3.f,2.f,.95f};
             for(int j=0;j<4;++j) {
                 V a=screen(legs[i].joints[j]),b=screen(legs[i].joints[j+1]);
                 // A fine shadow keeps the colored silhouette visible on light windows.
@@ -555,7 +562,7 @@ public:
                 if(j>0) dot(g,a,widths[j]*.58f,pigment(j));
             }
             V toe=screen(legs[i].joints[4]);
-            dot(g,toe,2.6f,pigment(2));
+            dot(g,toe,1.35f,pigment(3));
             if(i==hovered || i==grabbed) {
                 Pen ring(Color(i==grabbed?230:150,235,245,255),1.2f);
                 float r=(i==grabbed?8.f:10.f)*scale;
