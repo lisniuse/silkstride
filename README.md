@@ -56,6 +56,8 @@ in the tray menu. Use disposable files when trying this feature.
   has an oval, rounded triangular outline tapering toward the tail.
   Lateral roots open into a forward V, a short side pair, and rearward hind legs.
   Side constraints and segment-to-head clearance also apply while being dragged.
+  Soft body and leg shadows add depth; lifted feet and a held body cast fainter,
+  more distant shadows.
   Foot placement preserves extension, and distal joint limits prevent hooked feet.
   Continuous contacts replace grid snapping and per-step random jitter. Small
   corrective steps are skipped, and foot lift is visual height rather than a
@@ -288,6 +290,7 @@ Released under the [MIT License](LICENSE).
   和 [Harvey 等（2007）](https://doi.org/10.1071/IS05016)，静止朝向属于造型设计。
   行走与转向时，通过各腿的角度活动范围避免外露腿段交叉；腹部为椭圆感的圆角三角轮廓，尾端收尖。
   腿根从头胸部两侧向外伸展，前腿呈 V 形，短腿居侧，后腿向后伸；拖拽时也约束左右侧归属和整段腿与头部的间距。
+  身体与八条腿带柔和投影，抬脚或被抓起时阴影变淡、拉开距离，增强离地感。
   落脚点保留伸展距离，并限制末端关节折角，避免后腿折回成钩。
   使用连续落脚点，取消网格吸附和逐步随机抖动，跳过过小的修正步；抬脚只表现为视觉高度，
   不再横向拉扯身体，起落采用平滑曲线。

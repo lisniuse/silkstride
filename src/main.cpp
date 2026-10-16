@@ -870,7 +870,39 @@ public:
     void dot(Graphics& g,V p,float r,Color c) {
         SolidBrush b(c); r*=scale; g.FillEllipse(&b,p.x-r,p.y-r,r*2,r*2);
     }
+    void groundShadow(Graphics& g,V origin) {
+        float raised=grabbed>=0?1.f:std::clamp(airborne/.3f,0.f,1.f);
+        V offset=V{3+raised*7,4+raised*10}*scale;
+        auto screen=[&](V p){return p-pos+origin+offset;};
+        static const float widths[]={3.8f,3.f,2.8f,2.2f,1.5f,.95f};
+        // Soft stroke layers keep the shadow continuous around every joint.
+        // Raised feet cast a broader, fainter shadow than planted contacts.
+        for(const auto& leg:legs) for(int j=0;j<LEG_SEGMENTS;++j) {
+            float lift=leg.lift*float(j+1)/FOOT;
+            float softness=1+raised*2+lift*1.5f;
+            float opacity=(1-raised*.5f)*(1-lift*.45f);
+            V a=screen(leg.joints[j]),b=screen(leg.joints[j+1]);
+            V footOffset=V{1.5f,2.5f}*(scale*lift);
+            a=a+footOffset;b=b+footOffset;
+            for(int layer=3;layer>=1;--layer)
+                line(g,a,b,Color(BYTE((layer==1?20:layer==2?12:6)*opacity),9,12,17),widths[j]+layer*softness);
+        }
+        auto softBody=[&](V point,float rx,float ry,float alpha) {
+            auto state=g.Save();
+            g.TranslateTransform(point.x,point.y);
+            g.RotateTransform(std::atan2(heading.y,heading.x)*180/PI);
+            GraphicsPath path;path.AddEllipse(-rx*scale,-ry*scale,2*rx*scale,2*ry*scale);
+            PathGradientBrush brush(&path);
+            brush.SetCenterColor(Color(BYTE(alpha*(1-raised*.5f)),7,10,16));
+            Color edge(0,7,10,16);int count=1;brush.SetSurroundColors(&edge,&count);
+            g.FillPath(&brush,&path);g.Restore(state);
+        };
+        softBody(screen(physics.particles[2].p)-heading*(4*scale),27+raised*5,18+raised*4,110);
+        softBody(screen(physics.particles[0].p),13+raised*3,12+raised*3,90);
+        softBody(screen(physics.particles[1].p),11+raised*3,10+raised*3,85);
+    }
     void draw(Graphics& g,V origin) {
+        groundShadow(g,origin);
         auto screen=[&](V p) { return p-pos+origin; };
         V center=origin+bodyOffset;
         for(int i=0;i<8;++i) {
@@ -964,10 +996,10 @@ public:
             g.FillRectangle(&paper,morsel.x-3,morsel.y-4,6.f,8.f);
         }
     }
-    void render(const wchar_t* file=nullptr) {
+    void render(const wchar_t* file=nullptr,bool lightBackground=false) {
         Bitmap bitmap(CANVAS,CANVAS,CANVAS*4,PixelFormat32bppPARGB,static_cast<BYTE*>(pixels));
         {
-            Graphics g(&bitmap); g.Clear(Color(0,0,0,0));
+            Graphics g(&bitmap); g.Clear(lightBackground?Color(255,242,244,247):Color(0,0,0,0));
             g.SetSmoothingMode(SmoothingModeAntiAlias); g.SetPixelOffsetMode(PixelOffsetModeHighQuality);
             // Cancel integer window positioning so planted feet don't jitter a pixel.
             draw(g,{CANVAS*.5f+pos.x-std::round(pos.x),CANVAS*.5f+pos.y-std::round(pos.y)});
@@ -1347,7 +1379,8 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,PWSTR command,int) {
         else if(wcsstr(command,L"--motion-test")) { result=motionTest(spider); }
         else if(wcsstr(command,L"--preview")) {
             spider.rainbow=wcsstr(command,L"--preview-rainbow")!=nullptr;
-            spider.render(spider.rainbow?L"preview-rainbow.png":L"preview.png");
+            bool lightBackground=wcsstr(command,L"--preview-light-background")!=nullptr;
+            spider.render(lightBackground?L"preview-light.png":spider.rainbow?L"preview-rainbow.png":L"preview.png",lightBackground);
         }
         else {
             WNDCLASSW wc{}; wc.lpfnWndProc=WndProc; wc.hInstance=instance; wc.lpszClassName=L"NeonSpiderOverlay";
