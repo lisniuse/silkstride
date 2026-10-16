@@ -125,15 +125,25 @@ The script builds x64 Release with a static C++ runtime. CMake 3.20+ is also
 supported:
 
 ```powershell
-cmake -S . -B build/cmake -G "Visual Studio 17 2022" -A x64
-cmake --build build/cmake --config Release
-./build/cmake/Release/Silkstride.exe
+cmake -S . -B out/cmake -G "Visual Studio 17 2022" -A x64
+cmake --build out/cmake --config Release
+./out/cmake/Release/Silkstride.exe
 ```
 
 ### Diagnostics and contributing
 
-Exit the running pet before diagnostics. Run commands from `build/` and inspect
-the corresponding `*-test.txt` report; the process exits nonzero on failure.
+`build/` contains the runnable executable; compiler objects go to `out/obj/`.
+Exit the running pet before diagnostics, then run:
+
+```powershell
+pwsh -NoProfile -File ./test.ps1
+# Or select a suite:
+pwsh -NoProfile -File ./test.ps1 -Suite startup
+```
+
+Reports and preview images go to `out/tests/`; the script fails if a diagnostic
+fails or does not produce a report. For the manual arguments below, run
+`../../build/Silkstride.exe` from `out/tests/` so outputs stay outside `build/`.
 
 | Argument | Coverage |
 | --- | --- |
@@ -265,15 +275,23 @@ pwsh -NoProfile -File ./build.ps1
 脚本生成 x64 Release，静态链接 C++ 运行库。也支持 CMake 3.20+：
 
 ```powershell
-cmake -S . -B build/cmake -G "Visual Studio 17 2022" -A x64
-cmake --build build/cmake --config Release
-./build/cmake/Release/Silkstride.exe
+cmake -S . -B out/cmake -G "Visual Studio 17 2022" -A x64
+cmake --build out/cmake --config Release
+./out/cmake/Release/Silkstride.exe
 ```
 
 ### 验证与贡献
 
-先退出运行中的宠物，再在 `build/` 目录执行诊断参数。结果写入对应 `*-test.txt`，失败时
-返回非零退出码。
+`build/` 只放可运行程序，编译中间文件放在 `out/obj/`。先退出运行中的宠物，再执行：
+
+```powershell
+pwsh -NoProfile -File ./test.ps1
+# 也可只选择一组：
+pwsh -NoProfile -File ./test.ps1 -Suite startup
+```
+
+报告和预览图统一输出到 `out/tests/`，测试失败或没有生成报告时脚本报错。手动使用下列
+参数时，也请从 `out/tests/` 运行 `../../build/Silkstride.exe`，避免污染 `build/`。
 
 | 参数 | 验证内容 |
 | --- | --- |

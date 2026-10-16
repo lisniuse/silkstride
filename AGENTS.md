@@ -35,7 +35,10 @@ Examples / 示例：
 - Preserve existing pet memory and user preferences / 保留用户存档和偏好。
 - Never use a user's existing Recycle Bin files for tests. The canary test may
   delete only the unique disposable file it created / 测试只能删除自己创建的临时文件。
-- Run relevant diagnostics from `build/`. Non-destructive CI checks are motion,
+- Keep `build/` for runnable binaries; intermediate objects go to `out/obj/`.
+  Use `pwsh -NoProfile -File ./test.ps1` for diagnostics, with reports and images
+  in `out/tests/`. Run manual diagnostic arguments from `out/tests/` as well.
+  Non-destructive CI checks are motion,
   interaction, behavior, feeding, i18n, and startup tests. Startup tests must use
   isolated registry keys and never change actual sign-in startup entries.
   The input test moves the cursor;
