@@ -1,0 +1,36 @@
+name: Windows build and tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native x64 executable
+        run: ./build.ps1
+      - name: Run non-destructive diagnostics
+        working-directory: build
+        run: |
+          foreach ($name in @('motion', 'interaction', 'behavior', 'feeding', 'i18n')) {
+            $process = Start-Process ./Silkstride.exe -ArgumentList "--$name-test" -Wait -PassThru
+            Get-Content "$name-test.txt"
+            if ($process.ExitCode -ne 0) { throw "$name test failed: $($process.ExitCode)" }
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Silkstride-windows-x64
+          path: |
+            build/Silkstride.exe
+            build/*-test.txt
+            build/i18n-*.png
