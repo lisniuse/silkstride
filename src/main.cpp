@@ -72,6 +72,8 @@ public:
     int legCursor=0;
     int grabbed=-1,hovered=-1;
     bool escapeTurning=false;
+    float pivotStall=0;
+    int pivotRecoveries=0;
     float airborne=0,grabTime=0;
     V dragTarget{},dragVelocity{},lastDragPoint{};
     ULONGLONG lastDragTime=0;
@@ -274,7 +276,7 @@ public:
             for(int j=0;j<LEG_JOINTS;++j) l.joints[j]=physics.particles[l.ids[j]].p;
         }
         for(auto& b:physics.bends) b.rest=b.neutral;
-        velocity={}; angularSpeed=0; stepCooldown=.12f; rest=.25f; chooseTarget();
+        velocity={}; angularSpeed=0; pivotStall=0; stepCooldown=.12f; rest=.25f; chooseTarget();
         if(living) { mind.enter(CreatureMind::State::Recover,1.1f); memoryDirty=true; }
     }
     void interact(float dt) {
@@ -347,7 +349,7 @@ public:
     }
     void resetFeet() {
         grabbed=-1; airborne=0; hovered=-1;
-        escapeTurning=false;
+        escapeTurning=false; pivotStall=0;
         velocity={}; angularSpeed=0;
         toeOffsets={};
         if(hwnd) UnregisterHotKey(hwnd,3);
@@ -491,8 +493,11 @@ public:
             float rotation=angularSpeed*dt;
             // A planted foot near the head's centerline needs a new contact
             // before further yaw can safely carry its root around the torso.
+            // Only grounded contacts veto the turn: a lifted foot is already
+            // free to land wherever the new heading needs it.
             for(int i=0;i<8;++i) {
                 const auto& l=legs[i];
+                if(l.phase<1) continue;
                 V arm=l.foot-pos;
                 float sideAngle=std::atan2(heading.x*arm.y-heading.y*arm.x,heading.x*arm.x+heading.y*arm.y);
                 float side=i<4?-1.f:1.f;
@@ -500,6 +505,71 @@ public:
                 float signedAngle=side*sideAngle;
                 float lower=std::min(0.f,signedAngle-PI+margin),upper=std::max(0.f,signedAngle-margin);
                 rotation=side*std::clamp(side*rotation,lower,upper);
+            }
+            // A contact pressed against a desktop edge, or resting on the body
+            // axis, can veto the yaw outright. The turn then stops dead: with no
+            // rotation the contacts never reach the pose that would release
+            // them, so the creature stands there for the rest of the state.
+            // Move the blocking feet instead of waiting on them.
+            pivotStall=std::abs(rotation)<1e-4f?pivotStall+dt:0.f;
+            if(pivotStall>.35f) {
+                pivotStall=0;++pivotRecoveries;
+                float turnDirection=escapeError>0?1.f:-1.f;
+                // A contact the edge pins in place cannot be re-planted at all,
+                // so only accept a step the leg can actually make.
+                auto plant=[&](int i,V goal) {
+                    goal=contactInSector(i,goal,true);
+                    if(living) {
+                        float inset=20*scale;
+                        goal.x=std::clamp(goal.x,work.left+inset,work.right-inset);
+                        goal.y=std::clamp(goal.y,work.top+inset,work.bottom-inset);
+                    }
+                    auto& l=legs[i];
+                    if(length(goal-l.foot)<2*scale) return false;
+                    l.from=l.joints[FOOT];l.goal=goal;
+                    l.phase=0;l.lift=0;l.duration=.16f;
+                    return true;
+                };
+                // The resting hind legs sit at 165 degrees, right against the
+                // boundary that keeps a foot from crossing the body's rear
+                // axis, so a vetoing contact often has nowhere to go but out of
+                // that boundary. Swing it along its own side, away from the end
+                // of the arc it is stuck on.
+                auto clearVeto=[&](int i) {
+                    V neutral=neutralChain(i)[FOOT];
+                    neutral.y*=living?mind.stance:1.f;
+                    float radius=length(neutral),angle=std::atan2(neutral.y,neutral.x);
+                    float away=std::copysign(1.f,angle);
+                    float margin=std::asin(std::min(.95f,16*scale/std::max(1.f,radius)));
+                    float sweep=std::abs(angle)>=PI-margin?-1.f:1.f;
+                    for(float reach:{.35f,.7f,1.05f}) {
+                        float turned=angle+away*sweep*reach;
+                        if(plant(i,pos+local(std::cos(turned)*radius,std::sin(turned)*radius))) return true;
+                    }
+                    return false;
+                };
+                int replanted=0;
+                for(int i=0;i<8;++i) {
+                    const auto& l=legs[i];
+                    if(l.phase<1) continue;
+                    V arm=l.foot-pos;
+                    float sideAngle=std::atan2(heading.x*arm.y-heading.y*arm.x,heading.x*arm.x+heading.y*arm.y);
+                    float side=i<4?-1.f:1.f;
+                    float margin=std::asin(std::min(.95f,16*scale/std::max(1.f,length(arm))));
+                    float signedAngle=side*sideAngle;
+                    bool vetoes=side*turnDirection>0?signedAngle<=margin:signedAngle>=PI-margin;
+                    if(vetoes && clearVeto(i)) ++replanted;
+                }
+                // Nothing vetoed the yaw, so the turn was waiting on a step that
+                // never came: hand the foot with the most room a fresh contact.
+                if(!replanted) {
+                    int best=-1;float furthest=0;
+                    for(int i=0;i<8;++i) if(legs[i].phase>=1) {
+                        float distance=length(home(i)-legs[i].foot);
+                        if(distance>furthest) {furthest=distance;best=i;}
+                    }
+                    if(best>=0) plant(best,home(best));
+                }
             }
             float c=std::cos(rotation),sn=std::sin(rotation);
             heading={heading.x*c-heading.y*sn,heading.x*sn+heading.y*c};

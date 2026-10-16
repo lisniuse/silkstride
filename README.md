@@ -59,6 +59,8 @@ in the tray menu. Use disposable files when trying this feature.
   Soft body and leg shadows add depth; lifted feet and a held body cast fainter,
   more distant shadows.
   Foot placement preserves extension, and distal joint limits prevent hooked feet.
+  A turn blocked by its own footing re-plants the blocking feet, so reaching a
+  desktop edge or corner never leaves it standing in place.
   Continuous contacts replace grid snapping and per-step random jitter. Small
   corrective steps are skipped, and foot lift is visual height rather than a
   sideways force on the body; smooth swing curves ease takeoff and landing.
@@ -292,6 +294,7 @@ Released under the [MIT License](LICENSE).
   腿根从头胸部两侧向外伸展，前腿呈 V 形，短腿居侧，后腿向后伸；拖拽时也约束左右侧归属和整段腿与头部的间距。
   身体与八条腿带柔和投影，抬脚或被抓起时阴影变淡、拉开距离，增强离地感。
   落脚点保留伸展距离，并限制末端关节折角，避免后腿折回成钩。
+  若转身被自己的落脚点卡住，会重新迈开阻挡的腿，因此走到屏幕边缘或角落时不会原地僵住。
   使用连续落脚点，取消网格吸附和逐步随机抖动，跳过过小的修正步；抬脚只表现为视觉高度，
   不再横向拉扯身体，起落采用平滑曲线。
 - **默认自然分区配色**：头胸部深褐色，腹部为较浅的暖褐色并带细纹，腿部有深色环带。

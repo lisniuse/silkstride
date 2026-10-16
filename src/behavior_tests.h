@@ -182,6 +182,42 @@ int behaviorTest(Spider& s) {
           "Random idle gestures keep the body still and legs clear of the head and each other");
     out<<"Idle leg mask: "<<idleMask<<"; style mask: "<<idleStyles<<"; crossings: "<<idleCrossings<<"\n";
 
+    // A desktop corner pins contacts against the edge, and the resting hind
+    // legs sit right against the yaw limit that keeps a foot off the body's
+    // rear axis. A turn that stalls there used to park the creature for the
+    // rest of the state, so these seeds have to keep making progress instead.
+    // The first case is the ultrawide desktop it was reported on.
+    const unsigned stallSeeds[]={42,19,25,1};
+    const bool stallCorner[]={false,true,false,true};
+    const bool stallWide[]={true,false,false,false};
+    float worstStall=0,minimumTravel=1e9;int recoveries=0;
+    for(int i=0;i<4;++i) {
+        unsigned seed=stallSeeds[i];bool corner=stallCorner[i];
+        s.living=true;s.memoryEnabled=false;s.follow=false;s.hovered=-1;s.scale=1;s.speed=75;
+        s.work=stallWide[i]?RECT{0,0,5120,1440}:RECT{0,0,1800,1400};
+        s.pos=corner?V{160,160}:V{160,700};s.heading=s.aimHeading={1,0};
+        s.velocity={};s.escapeTurning=false;s.angularSpeed=0;s.stepCooldown=0;
+        s.rng.seed(seed);s.resetFeet();s.cursorPrimed=false;s.sensedCursor={-100000,-100000};
+        s.mind=CreatureMind{};s.mind.reseed(seed);s.mind.init(s.senses());
+        float stall=0,travel=0,caseWorst=0;
+        for(int frame=0;frame<120*120;++frame) {
+            V before=s.pos;V headingBefore=s.heading;
+            s.advance(1.f/120);
+            travel+=length(s.pos-before);
+            bool frozen=length(s.pos-before)<.0125f && std::abs(CrawlPhysics::angle(headingBefore,s.heading))<1e-4f;
+            stall=s.escapeTurning && frozen?stall+1.f/120:0.f;
+            caseWorst=std::max(caseWorst,stall);worstStall=std::max(worstStall,stall);
+        }
+        recoveries+=s.pivotRecoveries;minimumTravel=std::min(minimumTravel,travel);
+        out<<"Stall case seed "<<seed<<" on "<<(stallWide[i]?5120:1800)<<"x"<<(stallWide[i]?1440:1400)
+           <<(corner?" corner":" edge")<<": longest stall "<<caseWorst<<" s, travel "<<travel
+           <<" px, recoveries "<<s.pivotRecoveries<<"\n";
+    }
+    check(worstStall<.6f && minimumTravel>1200,"Edge, corner and ultrawide turns never park the creature in a stalled pivot");
+    check(recoveries>0,"A stalled turn steps a foot out of the way instead of standing still");
+    out<<"Worst pivot stall: "<<worstStall<<" s; minimum travel: "<<minimumTravel
+       <<" px; pivot recoveries: "<<recoveries<<"\n";
+
     // Exercise the real controller and free-body interaction for two simulated minutes.
     s.living=true; s.memoryEnabled=false; s.follow=false; s.hovered=-1; s.scale=1;
     s.pos={900,700}; s.heading={1,0}; s.work={0,0,1800,1400};
